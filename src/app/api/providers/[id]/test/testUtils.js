@@ -410,6 +410,15 @@ async function testApiKeyConnection(connection, effectiveProxy = null) {
         const res = await fetchWithConnectionProxy("https://api.openai.com/v1/models", { headers: { Authorization: `Bearer ${connection.apiKey}` } }, effectiveProxy);
         return { valid: res.ok, error: res.ok ? null : "Invalid API key" };
       }
+      case "qoder-api": {
+        try {
+          const { exchangeQoderApiToken } = await import("@/lib/qoder/apiSession.js");
+          await exchangeQoderApiToken(connection.apiKey, connection.providerSpecificData?.qoderApiSession || {});
+          return { valid: true, error: null };
+        } catch (err) {
+          return { valid: false, error: err.message || "Invalid Qoder API credential" };
+        }
+      }
       case "vercel-ai-gateway": {
         const res = await fetchWithConnectionProxy("https://ai-gateway.vercel.sh/v1/models", { headers: { Authorization: `Bearer ${connection.apiKey}` } }, effectiveProxy);
         return { valid: res.ok, error: res.ok ? null : "Invalid API key" };

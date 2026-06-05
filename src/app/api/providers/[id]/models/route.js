@@ -4,6 +4,7 @@ import { isOpenAICompatibleProvider, isAnthropicCompatibleProvider } from "@/sha
 import { GEMINI_CONFIG } from "@/lib/oauth/constants/oauth";
 import { refreshGoogleToken, updateProviderCredentials } from "@/sse/services/tokenRefresh";
 import { resolveOllamaLocalHost } from "open-sse/config/providers.js";
+import { getModelsByProviderId } from "open-sse/config/providerModels.js";
 import { resolveKiroModels } from "open-sse/services/kiroModels.js";
 import { resolveQoderModels } from "open-sse/services/qoderModels.js";
 
@@ -321,6 +322,14 @@ const PROVIDER_MODELS_CONFIG = {
       }
       return { models: [], warning };
     },
+  },
+  "qoder-api": {
+    customResolver: async () => ({
+      models: getModelsByProviderId("qoder-api").map((model) => ({
+        id: `qoder-api/${model.id}`,
+        name: model.name || model.id,
+      })),
+    }),
   },
   "gemini-cli": {
     customResolver: buildOAuthResolver({

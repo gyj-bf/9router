@@ -18,6 +18,7 @@ import { v4 as uuidv4 } from "uuid";
 
 import {
   QODER_CLIENT_TYPE,
+  QODER_COSY_VERSION,
   QODER_DATA_POLICY,
   QODER_IDE_VERSION,
   QODER_LOGIN_VERSION,
@@ -111,6 +112,8 @@ export function generateMachineId() {
  * @param {string} [creds.name]            Display name (optional).
  * @param {string} [creds.email]           Email (optional, can be empty).
  * @param {string} [creds.machineId]       Persisted machine UUID.
+ * @param {string} [creds.cosyVersion]     Override Cosy-Version header (default: QODER_COSY_VERSION).
+ * @param {string} [creds.machineOs]       Override Cosy-Machineos header (default: QODER_MACHINE_OS).
  * @returns {Record<string, string>} Header map ready to merge onto fetch().
  */
 export function buildCosyHeaders(body, requestUrl, creds) {
@@ -133,6 +136,8 @@ export function buildCosyHeaders(body, requestUrl, creds) {
 
   const timestamp = String(Math.floor(Date.now() / 1000));
   const requestId = uuidv4();
+  const cosyVersion = creds.cosyVersion || QODER_COSY_VERSION;
+  const machineOs = creds.machineOs || QODER_MACHINE_OS;
 
   const payloadJson = JSON.stringify({
     version: "v1",
@@ -156,11 +161,11 @@ export function buildCosyHeaders(body, requestUrl, creds) {
     "Cosy-Key": cosyKey,
     "Cosy-User": creds.userId,
     "Cosy-Date": timestamp,
-    "Cosy-Version": QODER_IDE_VERSION,
+    "Cosy-Version": cosyVersion,
     "Cosy-Machineid": machineId,
-    "Cosy-Machinetoken": machineId,
-    "Cosy-Machinetype": QODER_MACHINE_TYPE,
-    "Cosy-Machineos": QODER_MACHINE_OS,
+    "Cosy-Machinetoken": creds.machineToken || machineId,
+    "Cosy-Machinetype": creds.machineType || QODER_MACHINE_TYPE,
+    "Cosy-Machineos": machineOs,
     "Cosy-Clienttype": QODER_CLIENT_TYPE,
     "Cosy-Clientip": "127.0.0.1",
     "Cosy-Bodyhash": bodyHash,

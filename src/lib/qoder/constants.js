@@ -35,6 +35,29 @@ export const QODER_LOGIN_VERSION = "v2";
 export const QODER_MACHINE_OS = "x86_64_windows";
 export const QODER_MACHINE_TYPE = "5";
 
+/**
+ * Cosy protocol version (distinct from IDE version). Sourced from
+ * lingma-proxy's Remote API mode which reverse-engineers the same
+ * protocol. Override via `QODER_COSY_VERSION` env var if a newer
+ * version is discovered.
+ */
+export const QODER_COSY_VERSION = process.env.QODER_COSY_VERSION || "2.11.2";
+
+/**
+ * Platform identifiers the Qoder backend accepts in `Cosy-Machineos`.
+ * Mirrors lingma-proxy's `MachineOSHeader()` switch table. Pick one
+ * randomly per request to avoid fingerprinting on a single hardcoded
+ * platform (qoder2api used to always send `"x86_64_windows"`).
+ */
+export const QODER_MACHINE_OS_OPTIONS = [
+  "x86_64_darwin",
+  "arm64_darwin",
+  "x86_64_linux",
+  "arm64_linux",
+  "x86_64_windows",
+  "arm64_windows",
+];
+
 // Canonical model identifiers. Identity map — keep as a map so callers can
 // cheaply test "is this a known qoder model?" before sending the request.
 export const QODER_MODEL_MAP = {
@@ -45,12 +68,129 @@ export const QODER_MODEL_MAP = {
   efficient: "efficient",
   lite: "lite",
   // Frontier models
+  qmodel_latest: "qmodel_latest",
   qmodel: "qmodel",
   dmodel: "dmodel",
   dfmodel: "dfmodel",
   gm51model: "gm51model",
   kmodel: "kmodel",
   mmodel: "mmodel",
+};
+
+/**
+ * Static model configs for the API Key executor. The OAuth executor
+ * (qoder.js) fetches live configs from `/algo/api/v2/model/list`, but
+ * the API Key executor uses a static map because it has no device
+ * token to call the model list endpoint.
+ *
+ * `is_reasoning` and `is_vl` affect how the backend routes the request
+ * and whether it enables thinking-mode or vision capabilities.
+ * Values derived from the Qoder model catalog as of June 2026.
+ */
+export const QODER_MODEL_CONFIG_MAP = {
+  auto: {
+    display_name: "Auto",
+    is_reasoning: false,
+    is_vl: false,
+    format: "openai",
+    source: "system",
+    max_input_tokens: 180000,
+  },
+  ultimate: {
+    display_name: "Ultimate",
+    is_reasoning: false,
+    is_vl: false,
+    format: "openai",
+    source: "system",
+    max_input_tokens: 180000,
+  },
+  performance: {
+    display_name: "Performance",
+    is_reasoning: false,
+    is_vl: false,
+    format: "openai",
+    source: "system",
+    max_input_tokens: 180000,
+  },
+  efficient: {
+    display_name: "Efficient",
+    is_reasoning: false,
+    is_vl: false,
+    format: "openai",
+    source: "system",
+    max_input_tokens: 131072,
+  },
+  lite: {
+    display_name: "Lite",
+    is_reasoning: false,
+    is_vl: false,
+    format: "openai",
+    source: "system",
+    max_input_tokens: 131072,
+  },
+  qmodel_latest: {
+    display_name: "Qwen 3.7 Max",
+    model: "qwen3-max-latest",
+    is_reasoning: false,
+    is_vl: false,
+    format: "openai",
+    source: "system",
+    max_input_tokens: 180000,
+  },
+  qmodel: {
+    display_name: "Qwen 3.6 Plus",
+    model: "qwen3.6-plus",
+    is_reasoning: false,
+    is_vl: false,
+    format: "openai",
+    source: "system",
+    max_input_tokens: 180000,
+  },
+  dmodel: {
+    display_name: "DeepSeek V4 Pro",
+    model: "deepseek-v4-pro",
+    is_reasoning: true,
+    is_vl: false,
+    format: "openai",
+    source: "system",
+    max_input_tokens: 180000,
+  },
+  dfmodel: {
+    display_name: "DeepSeek V4",
+    model: "deepseek-v4",
+    is_reasoning: true,
+    is_vl: false,
+    format: "openai",
+    source: "system",
+    max_input_tokens: 180000,
+  },
+  gm51model: {
+    display_name: "GLM 5.1",
+    model: "glm-5.1",
+    is_reasoning: true,
+    is_vl: false,
+    format: "openai",
+    source: "system",
+    max_input_tokens: 131072,
+  },
+  kmodel: {
+    display_name: "Kimi K2.6",
+    model: "kimi-k2.6",
+    is_reasoning: false,
+    is_vl: false,
+    format: "openai",
+    source: "system",
+    max_input_tokens: 180000,
+  },
+  mmodel: {
+    display_name: "MiniMax M2.7",
+    model: "minimax-m2.7",
+    is_reasoning: false,
+    is_vl: false,
+    format: "openai",
+    source: "system",
+    max_input_tokens: 180000,
+  },
 };
 
 // RSA public key for COSY encryption (extracted from Qoder IDE v0.9).

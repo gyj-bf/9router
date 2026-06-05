@@ -159,6 +159,20 @@ export const PROVIDER_MODELS = {
     { id: "kmodel", name: "Kimi K2.6 (Qoder)" },
     { id: "mmodel", name: "MiniMax M2.7 (Qoder)" },
   ],
+  qda: [  // Qoder API - API Key / Personal Access Token flow
+    { id: "auto", name: "Auto-select by Qoder" },
+    { id: "ultimate", name: "Highest tier" },
+    { id: "performance", name: "Performance tier" },
+    { id: "efficient", name: "Efficient tier" },
+    { id: "lite", name: "Free tier" },
+    { id: "qmodel_latest", name: "Qwen 3.7 Max" },
+    { id: "qmodel", name: "Qwen 3.6 Plus" },
+    { id: "dmodel", name: "DeepSeek V4 Pro" },
+    { id: "dfmodel", name: "DeepSeek V4 Flash" },
+    { id: "gm51model", name: "GLM 5.1" },
+    { id: "kmodel", name: "Kimi K2.6" },
+    { id: "mmodel", name: "MiniMax M2.7" },
+  ],
   cu: [  // Cursor IDE
     { id: "default", name: "Auto (Server Picks)" },
     { id: "claude-4.5-opus-high-thinking", name: "Claude 4.5 Opus High Thinking" },
@@ -886,6 +900,7 @@ const OAUTH_ALIASES = {
   cline: "cl",
   opencode: "oc",
   qoder: "qd",
+  "qoder-api": "qda",
   vertex: "vertex",
   "vertex-partner": "vertex-partner",
 };

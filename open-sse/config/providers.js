@@ -102,6 +102,12 @@ export const PROVIDERS = {
     format: "openai",
     headers: {},
   },
+  "qoder-api": {
+    baseUrl: "https://api3.qoder.sh/algo/api/v2/service/pro/sse/agent_chat_generation",
+    format: "openai",
+    authType: "api_key",
+    headers: {},
+  },
   antigravity: {
     baseUrls: [
       "https://daily-cloudcode-pa.googleapis.com",

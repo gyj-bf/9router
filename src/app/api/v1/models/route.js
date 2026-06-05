@@ -147,6 +147,14 @@ function comboMatchesKinds(combo, kindFilter) {
   return kindFilter.includes(kind);
 }
 
+export function getOutputAliasesForProvider(providerId, outputAlias, staticAlias) {
+  const aliases = [outputAlias];
+  if (providerId === "qoder-api" && !aliases.includes("qoder-api")) {
+    aliases.push("qoder-api");
+  }
+  return Array.from(new Set(aliases.filter((alias) => typeof alias === "string" && alias.trim() !== "")));
+}
+
 /**
  * Build OpenAI-format models list filtered by service kinds.
  * @param {string[]} kindFilter - List of service kinds to include (e.g. ["llm"], ["webSearch","webFetch"]).
@@ -347,17 +355,20 @@ export async function buildModelsList(kindFilter) {
 
       const mergedModelIds = Array.from(new Set([...modelIds, ...customModelIds, ...aliasModelIds]));
 
+      const outputAliases = getOutputAliasesForProvider(providerId, outputAlias, staticAlias);
       for (const modelId of mergedModelIds) {
         // Resolve kind: prefer static metadata, otherwise infer from ID heuristics
         const kind = staticModelKindById.get(modelId) || inferKindFromUnknownModelId(modelId);
         if (!kindFilter.includes(kind)) continue;
         if (isDisabled(outputAlias, modelId) || isDisabled(staticAlias, modelId)) continue;
 
-        models.push({
-          id: `${outputAlias}/${modelId}`,
-          object: "model",
-          owned_by: outputAlias,
-        });
+        for (const alias of outputAliases) {
+          models.push({
+            id: `${alias}/${modelId}`,
+            object: "model",
+            owned_by: alias,
+          });
+        }
       }
 
       // Merge sub-config models (TTS / embedding) that live on AI_PROVIDERS, not PROVIDER_MODELS
