@@ -189,6 +189,9 @@ const PERIODS = [
   { value: "60d", label: "60D" },
 ];
 
+const REALTIME_STATS_REFRESH_DEBOUNCE_MS = 500;
+const STATS_REQUEST_SEQUENCE_STEP = 1;
+
 export default function UsageStats({ period: periodProp, setPeriod: setPeriodProp, hidePeriodSelector = false } = {}) {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -204,6 +207,8 @@ export default function UsageStats({ period: periodProp, setPeriod: setPeriodPro
   const [providers, setProviders] = useState([]);
   const [periodLocal, setPeriodLocal] = useState("today");
   const isInitialLoad = useRef(true);
+  const realtimeStatsTimer = useRef(null);
+  const statsRequestSeq = useRef(0);
   const period = periodProp ?? periodLocal;
   const setPeriod = setPeriodProp ?? setPeriodLocal;
 
@@ -231,6 +236,14 @@ export default function UsageStats({ period: periodProp, setPeriod: setPeriodPro
 
   // Fetch filtered stats via REST when period changes
   useEffect(() => {
+    const requestId = statsRequestSeq.current + STATS_REQUEST_SEQUENCE_STEP;
+    statsRequestSeq.current = requestId;
+
+    if (realtimeStatsTimer.current) {
+      clearTimeout(realtimeStatsTimer.current);
+      realtimeStatsTimer.current = null;
+    }
+
     // First load: show full spinner; subsequent: show subtle fetching indicator
     if (isInitialLoad.current) {
       isInitialLoad.current = false;
@@ -242,23 +255,56 @@ export default function UsageStats({ period: periodProp, setPeriod: setPeriodPro
     fetch(`/api/usage/stats?period=${period}`)
       .then((r) => r.ok ? r.json() : null)
       .then((data) => {
-        if (data) setStats((prev) => ({ ...prev, ...data }));
+        if (data && statsRequestSeq.current === requestId) {
+          setStats((prev) => ({ ...prev, ...data, summaryPulse: null }));
+        }
       })
       .catch(() => {})
       .finally(() => {
-        setLoading(false);
-        setFetching(false);
+        if (statsRequestSeq.current === requestId) {
+          setLoading(false);
+          setFetching(false);
+        }
       });
-  }, [period]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [period]);
 
-  // SSE connection - real-time updates for activeRequests + recentRequests only
+  const scheduleRealtimeStatsRefresh = useCallback(() => {
+    if (realtimeStatsTimer.current) {
+      clearTimeout(realtimeStatsTimer.current);
+    }
+
+    realtimeStatsTimer.current = setTimeout(() => {
+      realtimeStatsTimer.current = null;
+      const requestId = statsRequestSeq.current + STATS_REQUEST_SEQUENCE_STEP;
+      statsRequestSeq.current = requestId;
+      const requestedPeriod = period;
+
+      fetch(`/api/usage/stats?period=${requestedPeriod}`)
+        .then((r) => r.ok ? r.json() : null)
+        .then((data) => {
+          if (!data || statsRequestSeq.current !== requestId || requestedPeriod !== period) return;
+          setStats((prev) => ({
+            ...(prev || {}),
+            ...data,
+            summaryPulse: Date.now(),
+          }));
+        })
+        .catch(() => {})
+        .finally(() => {
+          if (statsRequestSeq.current === requestId) {
+            setLoading(false);
+          }
+        });
+    }, REALTIME_STATS_REFRESH_DEBOUNCE_MS);
+  }, [period]);
+
+  // SSE connection - real-time updates for activeRequests + recentRequests, plus debounced summary refresh
   useEffect(() => {
     const es = new EventSource("/api/usage/stream");
 
     es.onmessage = (e) => {
       try {
         const data = JSON.parse(e.data);
-        // Always merge only real-time fields, never overwrite full stats from REST
         setStats((prev) => ({
           ...(prev || {}),
           activeRequests: data.activeRequests,
@@ -266,6 +312,7 @@ export default function UsageStats({ period: periodProp, setPeriod: setPeriodPro
           errorProvider: data.errorProvider,
           pending: data.pending,
         }));
+        scheduleRealtimeStatsRefresh();
         setLoading(false);
       } catch (err) {
         console.error("[SSE CLIENT] parse error:", err);
@@ -274,8 +321,14 @@ export default function UsageStats({ period: periodProp, setPeriod: setPeriodPro
 
     es.onerror = () => setLoading(false);
 
-    return () => es.close();
-  }, []);
+    return () => {
+      es.close();
+      if (realtimeStatsTimer.current) {
+        clearTimeout(realtimeStatsTimer.current);
+        realtimeStatsTimer.current = null;
+      }
+    };
+  }, [scheduleRealtimeStatsRefresh]);
 
   const toggleSort = useCallback((tableType, field) => {
     const params = new URLSearchParams(searchParams.toString());
