@@ -3,6 +3,11 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { FREE_PROVIDERS, AI_PROVIDERS } from "@/shared/constants/providers";
+import {
+  createRequestSequenceGuard,
+  createDebounceTimer,
+  REALTIME_STATS_REFRESH_DEBOUNCE_MS,
+} from "@/shared/utils/usageRealtime";
 
 // Keep providers without serviceKinds (default LLM) or with "llm" in serviceKinds
 function isLLMProvider(id) {
@@ -204,6 +209,9 @@ export default function UsageStats({ period: periodProp, setPeriod: setPeriodPro
   const [providers, setProviders] = useState([]);
   const [periodLocal, setPeriodLocal] = useState("today");
   const isInitialLoad = useRef(true);
+  const realtimeStatsTimer = useRef(createDebounceTimer());
+  const statsRequestSeq = useRef(createRequestSequenceGuard());
+  const scheduleRef = useRef(null);
   const period = periodProp ?? periodLocal;
   const setPeriod = setPeriodProp ?? setPeriodLocal;
 
@@ -231,6 +239,10 @@ export default function UsageStats({ period: periodProp, setPeriod: setPeriodPro
 
   // Fetch filtered stats via REST when period changes
   useEffect(() => {
+    const requestId = statsRequestSeq.current.next();
+
+    realtimeStatsTimer.current.clear();
+
     // First load: show full spinner; subsequent: show subtle fetching indicator
     if (isInitialLoad.current) {
       isInitialLoad.current = false;
@@ -242,23 +254,53 @@ export default function UsageStats({ period: periodProp, setPeriod: setPeriodPro
     fetch(`/api/usage/stats?period=${period}`)
       .then((r) => r.ok ? r.json() : null)
       .then((data) => {
-        if (data) setStats((prev) => ({ ...prev, ...data }));
+        if (data && statsRequestSeq.current.isValid(requestId)) {
+          setStats((prev) => ({ ...prev, ...data, summaryPulse: null }));
+        }
       })
       .catch(() => {})
       .finally(() => {
-        setLoading(false);
-        setFetching(false);
+        if (statsRequestSeq.current.isValid(requestId)) {
+          setLoading(false);
+          setFetching(false);
+        }
       });
-  }, [period]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [period]);
 
-  // SSE connection - real-time updates for activeRequests + recentRequests only
+  const scheduleRealtimeStatsRefresh = useCallback(() => {
+    realtimeStatsTimer.current.schedule(() => {
+      const requestId = statsRequestSeq.current.next();
+      const requestedPeriod = period;
+
+      fetch(`/api/usage/stats?period=${requestedPeriod}`)
+        .then((r) => r.ok ? r.json() : null)
+        .then((data) => {
+          if (!data || !statsRequestSeq.current.isValid(requestId) || requestedPeriod !== period) return;
+          setStats((prev) => ({
+            ...(prev || {}),
+            ...data,
+            summaryPulse: Date.now(),
+          }));
+        })
+        .catch(() => {})
+        .finally(() => {
+          if (statsRequestSeq.current.isValid(requestId)) {
+            setLoading(false);
+          }
+        });
+    }, REALTIME_STATS_REFRESH_DEBOUNCE_MS);
+  }, [period]);
+
+  // Keep ref in sync so SSE effect doesn't need to depend on period
+  scheduleRef.current = scheduleRealtimeStatsRefresh;
+
+  // SSE connection - real-time updates for activeRequests + recentRequests, plus debounced summary refresh
   useEffect(() => {
     const es = new EventSource("/api/usage/stream");
 
     es.onmessage = (e) => {
       try {
         const data = JSON.parse(e.data);
-        // Always merge only real-time fields, never overwrite full stats from REST
         setStats((prev) => ({
           ...(prev || {}),
           activeRequests: data.activeRequests,
@@ -266,6 +308,7 @@ export default function UsageStats({ period: periodProp, setPeriod: setPeriodPro
           errorProvider: data.errorProvider,
           pending: data.pending,
         }));
+        scheduleRef.current();
         setLoading(false);
       } catch (err) {
         console.error("[SSE CLIENT] parse error:", err);
@@ -274,7 +317,13 @@ export default function UsageStats({ period: periodProp, setPeriod: setPeriodPro
 
     es.onerror = () => setLoading(false);
 
-    return () => es.close();
+    return () => {
+      es.close();
+      if (realtimeStatsTimer.current) {
+        clearTimeout(realtimeStatsTimer.current);
+        realtimeStatsTimer.current = null;
+      }
+    };
   }, []);
 
   const toggleSort = useCallback((tableType, field) => {
