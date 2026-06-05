@@ -209,6 +209,7 @@ export default function UsageStats({ period: periodProp, setPeriod: setPeriodPro
   const isInitialLoad = useRef(true);
   const realtimeStatsTimer = useRef(null);
   const statsRequestSeq = useRef(0);
+  const scheduleRef = useRef(null);
   const period = periodProp ?? periodLocal;
   const setPeriod = setPeriodProp ?? setPeriodLocal;
 
@@ -298,6 +299,9 @@ export default function UsageStats({ period: periodProp, setPeriod: setPeriodPro
     }, REALTIME_STATS_REFRESH_DEBOUNCE_MS);
   }, [period]);
 
+  // Keep ref in sync so SSE effect doesn't need to depend on period
+  scheduleRef.current = scheduleRealtimeStatsRefresh;
+
   // SSE connection - real-time updates for activeRequests + recentRequests, plus debounced summary refresh
   useEffect(() => {
     const es = new EventSource("/api/usage/stream");
@@ -312,7 +316,7 @@ export default function UsageStats({ period: periodProp, setPeriod: setPeriodPro
           errorProvider: data.errorProvider,
           pending: data.pending,
         }));
-        scheduleRealtimeStatsRefresh();
+        scheduleRef.current();
         setLoading(false);
       } catch (err) {
         console.error("[SSE CLIENT] parse error:", err);
@@ -328,7 +332,7 @@ export default function UsageStats({ period: periodProp, setPeriod: setPeriodPro
         realtimeStatsTimer.current = null;
       }
     };
-  }, [scheduleRealtimeStatsRefresh]);
+  }, []);
 
   const toggleSort = useCallback((tableType, field) => {
     const params = new URLSearchParams(searchParams.toString());
