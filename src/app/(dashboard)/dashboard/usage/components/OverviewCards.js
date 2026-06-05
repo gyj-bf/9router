@@ -3,38 +3,22 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import PropTypes from "prop-types";
 import Card from "@/shared/components/Card";
+import {
+  prefersReducedMotion,
+  formatCompactDelta,
+  formatSignedDelta,
+  calculateEasedProgress,
+  interpolateValue,
+  shouldTriggerDelta,
+  calculateDelta,
+  METRIC_ANIMATION_DURATION_MS,
+  DELTA_CLEAR_TIMEOUT_MS,
+  HIGHLIGHT_CLEAR_TIMEOUT_MS,
+  HIGHLIGHT_SHADOW_ALPHA,
+} from "@/shared/utils/usageRealtime";
 
 const fmt = (n) => new Intl.NumberFormat().format(n || 0);
 const fmtCost = (n) => `$${(n || 0).toFixed(2)}`;
-
-const METRIC_ANIMATION_DURATION_MS = 450;
-const DELTA_CLEAR_TIMEOUT_MS = 1800;
-const HIGHLIGHT_CLEAR_TIMEOUT_MS = 900;
-const COMPACT_THOUSAND = 1000;
-const COMPACT_MILLION = 1000000;
-const COMPACT_THOUSAND_DECIMAL_CUTOFF = 10000;
-const COMPACT_MILLION_DECIMAL_CUTOFF = 10000000;
-const HIGHLIGHT_SHADOW_ALPHA = 0.18;
-const ANIMATION_MAX_PROGRESS = 1;
-const EASE_OUT_CUBIC_POWER = 3;
-
-function prefersReducedMotion() {
-  if (typeof window === "undefined" || !window.matchMedia) return false;
-  return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-}
-
-function formatCompactDelta(value) {
-  const abs = Math.abs(value || 0);
-  if (abs >= COMPACT_MILLION) return `${(abs / COMPACT_MILLION).toFixed(abs >= COMPACT_MILLION_DECIMAL_CUTOFF ? 0 : 1)}M`;
-  if (abs >= COMPACT_THOUSAND) return `${(abs / COMPACT_THOUSAND).toFixed(abs >= COMPACT_THOUSAND_DECIMAL_CUTOFF ? 0 : 1)}K`;
-  return fmt(abs);
-}
-
-function formatSignedDelta(value, formatter) {
-  if (!value) return "";
-  const sign = value > 0 ? "+" : "−";
-  return `${sign}${formatter(Math.abs(value))}`;
-}
 
 function AnimatedMetricValue({ value, formatter, prefix = "" }) {
   const [displayValue, setDisplayValue] = useState(value || 0);
@@ -54,10 +38,10 @@ function AnimatedMetricValue({ value, formatter, prefix = "" }) {
     let frameId = 0;
 
     const tick = (now) => {
-      const progress = Math.min(ANIMATION_MAX_PROGRESS, (now - startedAt) / METRIC_ANIMATION_DURATION_MS);
-      const eased = ANIMATION_MAX_PROGRESS - Math.pow(ANIMATION_MAX_PROGRESS - progress, EASE_OUT_CUBIC_POWER);
-      setDisplayValue(from + (to - from) * eased);
-      if (progress < ANIMATION_MAX_PROGRESS) frameId = requestAnimationFrame(tick);
+      const progress = (now - startedAt) / METRIC_ANIMATION_DURATION_MS;
+      const eased = calculateEasedProgress(progress);
+      setDisplayValue(interpolateValue(from, to, eased));
+      if (progress < 1) frameId = requestAnimationFrame(tick);
     };
 
     frameId = requestAnimationFrame(tick);
@@ -87,9 +71,9 @@ function AnimatedMetricCard({ label, value, formatter, deltaFormatter, valueClas
     const previous = previousValue.current;
     previousValue.current = currentValue;
 
-    if (!pulseKey || previous === currentValue) return undefined;
+    if (!shouldTriggerDelta(pulseKey, previous, currentValue)) return undefined;
 
-    setDelta(currentValue - previous);
+    setDelta(calculateDelta(previous, currentValue));
     setHighlighted(true);
 
     const clearDelta = setTimeout(() => setDelta(0), DELTA_CLEAR_TIMEOUT_MS);

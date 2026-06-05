@@ -3,6 +3,11 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { FREE_PROVIDERS, AI_PROVIDERS } from "@/shared/constants/providers";
+import {
+  createRequestSequenceGuard,
+  createDebounceTimer,
+  REALTIME_STATS_REFRESH_DEBOUNCE_MS,
+} from "@/shared/utils/usageRealtime";
 
 // Keep providers without serviceKinds (default LLM) or with "llm" in serviceKinds
 function isLLMProvider(id) {
@@ -189,9 +194,6 @@ const PERIODS = [
   { value: "60d", label: "60D" },
 ];
 
-const REALTIME_STATS_REFRESH_DEBOUNCE_MS = 500;
-const STATS_REQUEST_SEQUENCE_STEP = 1;
-
 export default function UsageStats({ period: periodProp, setPeriod: setPeriodProp, hidePeriodSelector = false } = {}) {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -207,8 +209,8 @@ export default function UsageStats({ period: periodProp, setPeriod: setPeriodPro
   const [providers, setProviders] = useState([]);
   const [periodLocal, setPeriodLocal] = useState("today");
   const isInitialLoad = useRef(true);
-  const realtimeStatsTimer = useRef(null);
-  const statsRequestSeq = useRef(0);
+  const realtimeStatsTimer = useRef(createDebounceTimer());
+  const statsRequestSeq = useRef(createRequestSequenceGuard());
   const scheduleRef = useRef(null);
   const period = periodProp ?? periodLocal;
   const setPeriod = setPeriodProp ?? setPeriodLocal;
@@ -237,13 +239,9 @@ export default function UsageStats({ period: periodProp, setPeriod: setPeriodPro
 
   // Fetch filtered stats via REST when period changes
   useEffect(() => {
-    const requestId = statsRequestSeq.current + STATS_REQUEST_SEQUENCE_STEP;
-    statsRequestSeq.current = requestId;
+    const requestId = statsRequestSeq.current.next();
 
-    if (realtimeStatsTimer.current) {
-      clearTimeout(realtimeStatsTimer.current);
-      realtimeStatsTimer.current = null;
-    }
+    realtimeStatsTimer.current.clear();
 
     // First load: show full spinner; subsequent: show subtle fetching indicator
     if (isInitialLoad.current) {
@@ -256,13 +254,13 @@ export default function UsageStats({ period: periodProp, setPeriod: setPeriodPro
     fetch(`/api/usage/stats?period=${period}`)
       .then((r) => r.ok ? r.json() : null)
       .then((data) => {
-        if (data && statsRequestSeq.current === requestId) {
+        if (data && statsRequestSeq.current.isValid(requestId)) {
           setStats((prev) => ({ ...prev, ...data, summaryPulse: null }));
         }
       })
       .catch(() => {})
       .finally(() => {
-        if (statsRequestSeq.current === requestId) {
+        if (statsRequestSeq.current.isValid(requestId)) {
           setLoading(false);
           setFetching(false);
         }
@@ -270,20 +268,14 @@ export default function UsageStats({ period: periodProp, setPeriod: setPeriodPro
   }, [period]);
 
   const scheduleRealtimeStatsRefresh = useCallback(() => {
-    if (realtimeStatsTimer.current) {
-      clearTimeout(realtimeStatsTimer.current);
-    }
-
-    realtimeStatsTimer.current = setTimeout(() => {
-      realtimeStatsTimer.current = null;
-      const requestId = statsRequestSeq.current + STATS_REQUEST_SEQUENCE_STEP;
-      statsRequestSeq.current = requestId;
+    realtimeStatsTimer.current.schedule(() => {
+      const requestId = statsRequestSeq.current.next();
       const requestedPeriod = period;
 
       fetch(`/api/usage/stats?period=${requestedPeriod}`)
         .then((r) => r.ok ? r.json() : null)
         .then((data) => {
-          if (!data || statsRequestSeq.current !== requestId || requestedPeriod !== period) return;
+          if (!data || !statsRequestSeq.current.isValid(requestId) || requestedPeriod !== period) return;
           setStats((prev) => ({
             ...(prev || {}),
             ...data,
@@ -292,7 +284,7 @@ export default function UsageStats({ period: periodProp, setPeriod: setPeriodPro
         })
         .catch(() => {})
         .finally(() => {
-          if (statsRequestSeq.current === requestId) {
+          if (statsRequestSeq.current.isValid(requestId)) {
             setLoading(false);
           }
         });
