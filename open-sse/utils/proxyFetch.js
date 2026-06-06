@@ -1,6 +1,6 @@
 import { Readable } from "stream";
 import { MEMORY_CONFIG } from "../config/runtimeConfig.js";
-import { dbg } from "./debugLog.js";
+import * as logger from "../../src/sse/utils/logger.js";
 
 const originalFetch = globalThis.fetch;
 const proxyDispatchers = new Map();
@@ -21,7 +21,7 @@ async function getGotScraping() {
     _gotScraping = typeof mod.gotScraping === "function" ? mod.gotScraping : null;
     if (_gotScraping) dbg("TLS", "got-scraping loaded (browser-like JA3 enabled)");
   } catch (e) {
-    console.warn(`[ProxyFetch] got-scraping unavailable, falling back to native fetch: ${e.message}`);
+    logger.proxy(`got-scraping unavailable, falling back to native fetch: ${e.message}`);
     _gotScraping = null;
   }
   return _gotScraping;
@@ -91,7 +91,7 @@ async function tryGotScrapingFetch(url, options) {
     }
     return res;
   } catch (e) {
-    console.warn(`[ProxyFetch] got-scraping request failed, fallback to native fetch: ${e.message}`);
+    logger.proxy(`got-scraping request failed, fallback to native fetch: ${e.message}`);
     return null;
   }
 }
@@ -135,7 +135,7 @@ async function resolveRealIP(hostname) {
     DNS_CACHE.set(hostname, { ip: addresses[0], expiry: Date.now() + MEMORY_CONFIG.dnsCacheTtlMs });
     return addresses[0];
   } catch (error) {
-    console.warn(`[ProxyFetch] DNS resolve failed for ${hostname}:`, error.message);
+    logger.proxy(`DNS resolve failed for ${hostname}: ${error.message}`);
     return null;
   }
 }
@@ -344,7 +344,7 @@ export async function proxyAwareFetch(url, options = {}, proxyOptions = null) {
         if (proxyOptions?.strictProxy === true) {
           throw new Error(`[ProxyFetch] Proxy required but failed (strictProxy=true): ${proxyError.message}`);
         }
-        console.warn(`[ProxyFetch] Proxy failed, falling back to direct bypass: ${proxyError.message}`);
+        logger.proxy(`Proxy failed, falling back to direct bypass: ${proxyError.message}`);
       }
     }
     // No proxy — manually resolve real IP to bypass DNS spoof
@@ -353,7 +353,7 @@ export async function proxyAwareFetch(url, options = {}, proxyOptions = null) {
       const realIP = await resolveRealIP(parsedUrl.hostname);
       if (realIP) return await createBypassRequest(parsedUrl, realIP, options);
     } catch (error) {
-      console.warn(`[ProxyFetch] MITM bypass failed: ${error.message}`);
+      logger.proxy(`MITM bypass failed: ${error.message}`);
     }
   }
 
@@ -366,7 +366,7 @@ export async function proxyAwareFetch(url, options = {}, proxyOptions = null) {
       if (proxyOptions?.strictProxy === true) {
         throw new Error(`[ProxyFetch] Proxy required but failed (strictProxy=true): ${proxyError.message}`);
       }
-      console.warn(`[ProxyFetch] Proxy failed, falling back to direct: ${proxyError.message}`);
+      logger.proxy(`Proxy failed, falling back to direct: ${proxyError.message}`);
       return originalFetch(url, options);
     }
   }

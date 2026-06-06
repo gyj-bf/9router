@@ -116,8 +116,7 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
 
   // RTK: compress tool_result content
   const rtkStats = compressMessages(translatedBody, rtkEnabled);
-  const rtkLine = formatRtkLog(rtkStats);
-  if (rtkLine) console.log(rtkLine);
+  formatRtkLog(rtkStats);
 
   // Caveman: inject terse-style system prompt
   if (cavemanEnabled && cavemanLevel) {
