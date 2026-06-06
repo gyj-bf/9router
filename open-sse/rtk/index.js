@@ -3,6 +3,7 @@
 import { RAW_CAP, MIN_COMPRESS_SIZE } from "./constants.js";
 import { autoDetectFilter } from "./autodetect.js";
 import { safeApply } from "./applyFilter.js";
+import * as logger from "../../src/sse/utils/logger.js";
 
 // Compress tool_result content in-place. Returns stats or null if disabled/failed.
 export function compressMessages(body, enabled) {
@@ -81,7 +82,7 @@ export function compressMessages(body, enabled) {
       }
     }
   } catch (e) {
-    console.warn("[RTK] compressMessages error:", e.message);
+    logger.rtk(`compressMessages error: ${e.message}`);
     return null;
   }
   return stats;
@@ -111,7 +112,7 @@ function compressKiroFormat(body, enabled) {
       }
     }
   } catch (e) {
-    console.warn("[RTK] compressKiroFormat error:", e.message);
+    logger.rtk(`compressKiroFormat error: ${e.message}`);
     return null;
   }
   return stats;
@@ -145,11 +146,11 @@ function compressText(text, stats, shape) {
   return out;
 }
 
-// Convenience: format a log line from stats
+// Convenience: log RTK compression stats
 export function formatRtkLog(stats) {
-  if (!stats || !stats.hits || stats.hits.length === 0) return null;
+  if (!stats || !stats.hits || stats.hits.length === 0) return;
   const saved = stats.bytesBefore - stats.bytesAfter;
   const pct = stats.bytesBefore > 0 ? ((saved / stats.bytesBefore) * 100).toFixed(1) : "0";
   const filters = Array.from(new Set(stats.hits.map(h => h.filter))).join(",");
-  return `[RTK] saved ${saved}B / ${stats.bytesBefore}B (${pct}%) via [${filters}] hits=${stats.hits.length}`;
+  logger.rtk(`saved ${saved}B / ${stats.bytesBefore}B (${pct}%) via [${filters}] hits=${stats.hits.length}`);
 }

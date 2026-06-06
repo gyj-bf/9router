@@ -2,6 +2,7 @@ import { EventEmitter } from "events";
 import { getAdapter } from "../driver.js";
 import { parseJson, stringifyJson } from "../helpers/jsonCol.js";
 import { getMeta, setMeta } from "../helpers/metaStore.js";
+import * as logger from "../../../sse/utils/logger.js";
 
 const PENDING_TIMEOUT_MS = 60 * 1000;
 const RING_CAP = 50;
@@ -145,7 +146,7 @@ async function calculateCost(provider, model, tokens) {
 
     return cost;
   } catch (e) {
-    console.error("Error calculating cost:", e);
+    logger.error("calculateCost", e.message);
     return 0;
   }
 }
@@ -190,8 +191,7 @@ export function trackPendingRequest(model, provider, connectionId, started, erro
     lastErrorProvider.ts = Date.now();
   }
 
-  const t = new Date().toLocaleTimeString("en-US", { hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit" });
-  console.log(`[${t}] [PENDING] ${started ? "START" : "END"}${error ? " (ERROR)" : ""} | provider=${provider} | model=${model}`);
+  logger.pending(`${started ? "START" : "END"}${error ? " (ERROR)" : ""} | provider=${provider} | model=${model}`);
   statsEmitter.emit("pending");
 }
 
@@ -282,7 +282,7 @@ export async function saveRequestUsage(entry) {
     pushToRing(entry);
     statsEmitter.emit("update");
   } catch (e) {
-    console.error("Failed to save usage stats:", e);
+    logger.error("saveRequestUsage", e.message);
   }
 }
 
@@ -725,7 +725,7 @@ export async function getRecentLogs(limit = 200) {
       return `${ts} | ${m} | ${p} | ${account} | ${sent} | ${received} | ${r.status || "-"}`;
     });
   } catch (e) {
-    console.error("[usageRepo] getRecentLogs failed:", e.message);
+    logger.error("getRecentLogs", e.message);
     return [];
   }
 }

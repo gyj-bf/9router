@@ -9,7 +9,7 @@ const LOG_LEVELS = {
 
 const LEVEL = LOG_LEVELS.DEBUG;
 
-function formatTime() {
+export function formatTime() {
   return new Date().toLocaleTimeString("en-US", { hour12: false });
 }
 
@@ -65,6 +65,22 @@ export function response(status, duration, extra) {
 export function stream(event, data) {
   const dataStr = data ? ` ${formatData(data)}` : "";
   console.log(`[${formatTime()}] 🌊 [STREAM] ${event}${dataStr}`);
+}
+
+export function proxy(message) {
+  console.log(`[${formatTime()}] 🌐 [PROXY FETCH] ${message}`);
+}
+
+export function rtk(message) {
+  console.log(`[${formatTime()}] 📦 [RTK] ${message}`);
+}
+
+export function pending(message) {
+  console.log(`[${formatTime()}] ⏳ [PENDING] ${message}`);
+}
+
+export function usage(message) {
+  console.log(`[${formatTime()}] 📊 [USAGE] ${message}`);
 }
 
 // Mask sensitive data
