@@ -10,6 +10,7 @@ import {
 import { qoderEncodeBody } from "../../src/lib/qoder/encoding.js";
 import { buildCosyHeaders } from "../../src/lib/qoder/cosy.js";
 import { exchangeQoderApiToken, isQoderApiSessionValid } from "../../src/lib/qoder/apiSession.js";
+import { proxyAwareFetch } from "../utils/proxyFetch.js";
 import * as logger from "../../src/sse/utils/logger.js";
 
 // Max output tokens: Set a high default to allow for long code generation and reasoning, can be overridden by request body
@@ -298,12 +299,12 @@ export class QoderApiExecutor {
     return typeof value === "object" ? value : { key: modelKey, source: "system" };
   }
 
-  async ensureSession(credentials, onCredentialsRefreshed) {
+  async ensureSession(credentials, onCredentialsRefreshed, proxyOptions = null) {
     const providerSpecificData = credentials?.providerSpecificData || {};
     const cached = providerSpecificData.qoderApiSession;
     if (isQoderApiSessionValid(cached) && cached.userId && cached.securityOauthToken) return cached;
 
-    const session = await exchangeQoderApiToken(credentials?.apiKey, cached || {});
+    const session = await exchangeQoderApiToken(credentials?.apiKey, cached || {}, proxyOptions);
     const nextProviderSpecificData = {
       ...providerSpecificData,
       qoderApiSession: session,
@@ -318,8 +319,8 @@ export class QoderApiExecutor {
     return session;
   }
 
-  async execute({ model, body, credentials, provider, onCredentialsRefreshed }) {
-    const session = await this.ensureSession(credentials || {}, onCredentialsRefreshed);
+  async execute({ model, body, credentials, provider, onCredentialsRefreshed, proxyOptions = null }) {
+    const session = await this.ensureSession(credentials || {}, onCredentialsRefreshed, proxyOptions);
     const modelKey = QoderApiExecutor.normalizeModelKey(model || body?.model);
     const modelConfig = QoderApiExecutor.getModelConfig(modelKey);
     const transformedBody = buildQoderApiPayload(body || {}, {
@@ -353,11 +354,11 @@ export class QoderApiExecutor {
       ...cosyHeaders,
     };
 
-    const response = await fetch(QODER_CHAT_URL_ENCODED, {
+    const response = await proxyAwareFetch(QODER_CHAT_URL_ENCODED, {
       method: "POST",
       headers,
       body: encodedBodyBuffer,
-    });
+    }, proxyOptions);
 
     if (!response.ok) {
       return { response, url: QODER_CHAT_URL_ENCODED, headers, transformedBody };

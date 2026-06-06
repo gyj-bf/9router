@@ -258,3 +258,129 @@ Payload plaintext (before encoding) di `.qoder-chat-body.tmp`:
   ]
 }
 ```
+
+## 4. Enterprise Firewall Bypass (MITM DNS)
+
+Some enterprise firewalls (FortiGate, etc.) perform DNS spoofing to intercept and inspect HTTPS traffic, which can cause `TypeError: terminated` errors when connecting to Qoder API.
+
+### Solution: MITM DNS Bypass
+
+Enable DNS bypass to resolve Qoder hosts via Google DNS (8.8.8.8) instead of corporate DNS:
+
+```bash
+# .env
+MITM_BYPASS_QODER=true
+```
+
+This bypasses DNS-level blocking for all Qoder domains:
+- `*.qoder.sh` (center.qoder.sh, api3.qoder.sh, etc.)
+- `*.qoder.com` (all qoder.com subdomains)
+- Any future Qoder endpoints
+
+### How It Works
+
+**Without MITM bypass (blocked by FortiGate):**
+```
+9Router → Corporate DNS → FortiGate redirects to inspection proxy
+       → TLS handshake fails → TypeError: terminated
+```
+
+**With MITM bypass enabled:**
+```
+9Router → Google DNS (8.8.8.8) → Real Qoder IP
+       → Direct TLS connection → Success ✅
+```
+
+### Topology Diagram
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│ 9Router Server                                              │
+│                                                             │
+│  ┌──────────────┐                                           │
+│  │ proxyFetch   │                                           │
+│  │              │                                           │
+│  │ Check:       │                                           │
+│  │ MITM_BYPASS_ │                                           │
+│  │ QODER=true?  │─────┐                                     │
+│  └──────────────┘     │                                     │
+│                       │                                     │
+│  ┌──────────────┐     │    ┌──────────────────┐            │
+│  │ DNS Resolver │◄────┘    │ Google DNS       │            │
+│  │              │─────────►│ 8.8.8.8          │            │
+│  └──────────────┘          │ 8.8.4.4          │            │
+│         │                  └──────────────────┘            │
+│         │                                                   │
+│         │ Real IP: 47.xx.xx.xx                             │
+│         ▼                                                   │
+│  ┌──────────────┐                                           │
+│  │ TLS Connect  │                                           │
+│  │ Direct to    │                                           │
+│  │ Qoder API    │──────────────────────────────────────┐   │
+│  └──────────────┘                                       │   │
+└─────────────────────────────────────────────────────────┼───┘
+                                                          │
+                                                          │
+┌─────────────────────────────────────────────────────────┼───┐
+│ Corporate Network (FortiGate)                           │   │
+│                                                         │   │
+│  ┌──────────────┐                                       │   │
+│  │ Corporate    │  DNS spoofing                         │   │
+│  │ DNS Server   │  (blocked by bypass)                  │   │
+│  └──────────────┘                                       │   │
+│                                                         │   │
+│  ┌──────────────┐                                       │   │
+│  │ FortiGate    │  DPI inspection                       │   │
+│  │ Firewall     │  (bypassed via direct IP)             │   │
+│  └──────────────┘                                       │   │
+└─────────────────────────────────────────────────────────┼───┘
+                                                          │
+                                                          │
+┌─────────────────────────────────────────────────────────┼───┐
+│ Qoder API Servers                                       │   │
+│                                                         │   │
+│  ┌──────────────────────────────────────────────────┐  │   │
+│  │ center.qoder.sh  (token exchange)                │◄─┘   │
+│  │ api3.qoder.sh    (chat generation)               │      │
+│  └──────────────────────────────────────────────────┘      │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### Configuration Options
+
+| Variable | Description | Example |
+|----------|-------------|---------|
+| `MITM_BYPASS_QODER` | Enable DNS bypass for all `*.qoder.sh` and `*.qoder.com` hosts | `true` |
+| `MITM_BYPASS_EXTRA_HOSTS` | Comma-separated list of additional hosts to bypass | `custom.api.com,another.host.com` |
+
+### When to Use
+
+**Enable MITM bypass when:**
+- Running 9Router behind enterprise firewall (FortiGate, Palo Alto, etc.)
+- Experiencing `TypeError: terminated` or TLS handshake failures
+- Corporate DNS redirects Qoder hosts to inspection proxy
+
+**Disable MITM bypass when:**
+- Running on home network or VPS (no corporate firewall)
+- Using HTTP_PROXY/HTTPS_PROXY (proxy handles DNS resolution)
+- Network allows direct connections to Qoder
+
+### Limitations
+
+MITM DNS bypass only works if the firewall uses **DNS-level blocking**. It will NOT bypass:
+- IP-level blocking (firewall blocks Qoder IP ranges)
+- Deep packet inspection with forced proxy (all traffic must go through proxy)
+- Certificate pinning enforcement (rare for API endpoints)
+
+For these cases, use `HTTP_PROXY`/`HTTPS_PROXY` to route through an external proxy.
+
+### Security Considerations
+
+When using MITM bypass:
+- ✅ TLS certificate validation still occurs (hostname verified against cert)
+- ✅ Safe for public CA-issued certificates (Qoder, Google, GitHub)
+- ⚠️ Bypasses corporate DNS-based security controls
+- ⚠️ May violate corporate security policies - get approval before use
+- ❌ Does NOT protect against IP-level blocking or forced proxy scenarios
+
+**Important:** Only enable MITM bypass on networks you trust. The bypass prevents DNS-level inspection but does not disable TLS certificate validation, so connections remain secure against man-in-the-middle attacks.

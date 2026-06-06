@@ -1,4 +1,10 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+
+vi.mock("../../open-sse/utils/proxyFetch.js", () => ({
+  proxyAwareFetch: vi.fn(),
+}));
+
+import { proxyAwareFetch } from "../../open-sse/utils/proxyFetch.js";
 import { qoderEncodeBody } from "../../src/lib/qoder/encoding.js";
 import {
   exchangeQoderApiToken,
@@ -6,17 +12,14 @@ import {
   redactQoderApiSession,
 } from "../../src/lib/qoder/apiSession.js";
 
-const originalFetch = global.fetch;
-
 describe("qoder-api session helper", () => {
   beforeEach(() => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-06-02T00:00:00.000Z"));
-    global.fetch = vi.fn();
+    vi.clearAllMocks();
   });
 
   afterEach(() => {
-    global.fetch = originalFetch;
     vi.useRealTimers();
     vi.restoreAllMocks();
   });
@@ -32,7 +35,7 @@ describe("qoder-api session helper", () => {
       email: "user@example.com",
       plan: "pro",
     };
-    global.fetch.mockResolvedValueOnce(new Response(JSON.stringify(upstreamSession), { status: 200, headers: { "content-type": "application/json" } }));
+    proxyAwareFetch.mockResolvedValueOnce(new Response(JSON.stringify(upstreamSession), { status: 200, headers: { "content-type": "application/json" } }));
 
     const session = await exchangeQoderApiToken("pat-secret", {
       machineId: "machine-1",
@@ -40,9 +43,9 @@ describe("qoder-api session helper", () => {
       machineType: "linux",
     });
 
-    expect(global.fetch).toHaveBeenCalledTimes(1);
-    expect(global.fetch.mock.calls[0][0]).toBe("https://center.qoder.sh/algo/api/v3/user/jobToken?Encode=1");
-    const request = global.fetch.mock.calls[0][1];
+    expect(proxyAwareFetch).toHaveBeenCalledTimes(1);
+    expect(proxyAwareFetch.mock.calls[0][0]).toBe("https://center.qoder.sh/algo/api/v3/user/jobToken?Encode=1");
+    const request = proxyAwareFetch.mock.calls[0][1];
     const expectedInnerPayload = JSON.stringify({
       personalToken: "pat-secret",
       securityOauthToken: "",
@@ -86,14 +89,31 @@ describe("qoder-api session helper", () => {
   it("rejects missing token before calling Qoder", async () => {
     await expect(exchangeQoderApiToken("", { machineId: "m", machineToken: "t", machineType: "linux" }))
       .rejects.toThrow("Qoder API credential is required");
-    expect(global.fetch).not.toHaveBeenCalled();
+    expect(proxyAwareFetch).not.toHaveBeenCalled();
   });
 
   it("reports token exchange failures without leaking the token", async () => {
-    global.fetch.mockResolvedValueOnce(new Response("upstream body with pat-secret", { status: 401 }));
+    proxyAwareFetch.mockResolvedValueOnce(new Response("upstream body with pat-secret", { status: 401 }));
 
     await expect(exchangeQoderApiToken("pat-secret", { machineId: "m", machineToken: "t", machineType: "linux" }))
       .rejects.toThrow("Qoder API token exchange failed with status 401");
+  });
+
+  it("passes proxyOptions through to proxyAwareFetch", async () => {
+    const proxyOptions = { enabled: true, url: "http://proxy:8080" };
+    proxyAwareFetch.mockResolvedValueOnce(new Response(JSON.stringify({
+      id: "user-123",
+      securityOauthToken: "token-123",
+      expireTime: Date.now() + 60_000,
+    }), { status: 200, headers: { "content-type": "application/json" } }));
+
+    await exchangeQoderApiToken("pat-secret", { machineId: "m", machineToken: "t", machineType: "linux" }, proxyOptions);
+
+    expect(proxyAwareFetch).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.any(Object),
+      proxyOptions
+    );
   });
 
   it("validates sessions with a refresh margin", () => {
@@ -224,17 +244,16 @@ describe("qoder-api executor network flow", () => {
   beforeEach(() => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-06-02T00:00:00.000Z"));
-    global.fetch = vi.fn();
+    vi.clearAllMocks();
   });
 
   afterEach(() => {
-    global.fetch = originalFetch;
     vi.useRealTimers();
     vi.restoreAllMocks();
   });
 
   it("exchanges the token, encodes/signs the request, and posts to Qoder SSE endpoint", async () => {
-    global.fetch
+    proxyAwareFetch
       .mockResolvedValueOnce(new Response(JSON.stringify({
         name: "User",
         id: "user-123",
@@ -256,9 +275,9 @@ describe("qoder-api executor network flow", () => {
       onCredentialsRefreshed,
     });
 
-    expect(global.fetch).toHaveBeenCalledTimes(2);
-    expect(global.fetch.mock.calls[1][0]).toBe(QODER_CHAT_URL_ENCODED);
-    const request = global.fetch.mock.calls[1][1];
+    expect(proxyAwareFetch).toHaveBeenCalledTimes(2);
+    expect(proxyAwareFetch.mock.calls[1][0]).toBe(QODER_CHAT_URL_ENCODED);
+    const request = proxyAwareFetch.mock.calls[1][1];
     expect(request.method).toBe("POST");
     expect(request.headers.Authorization).toMatch(/^Bearer COSY\./);
     const persistedSession = credentials.providerSpecificData.qoderApiSession;
@@ -969,17 +988,16 @@ describe("qoder-api Cosy headers", () => {
   beforeEach(() => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-06-02T00:00:00.000Z"));
-    global.fetch = vi.fn();
+    vi.clearAllMocks();
   });
 
   afterEach(() => {
-    global.fetch = originalFetch;
     vi.useRealTimers();
     vi.restoreAllMocks();
   });
 
   it("sends Cosy-Version 2.11.2 in chat request headers", async () => {
-    global.fetch
+    proxyAwareFetch
       .mockResolvedValueOnce(new Response(JSON.stringify({
         name: "User",
         id: "user-123",
@@ -999,7 +1017,7 @@ describe("qoder-api Cosy headers", () => {
       provider: "qoder-api",
     });
 
-    const chatRequest = global.fetch.mock.calls[1][1];
+    const chatRequest = proxyAwareFetch.mock.calls[1][1];
     expect(chatRequest.headers["Cosy-Version"]).toBe("2.11.2");
   });
 
@@ -1013,7 +1031,7 @@ describe("qoder-api Cosy headers", () => {
       "arm64_linux",
     ];
 
-    global.fetch
+    proxyAwareFetch
       .mockResolvedValueOnce(new Response(JSON.stringify({
         name: "User",
         id: "user-123",
@@ -1033,7 +1051,7 @@ describe("qoder-api Cosy headers", () => {
       provider: "qoder-api",
     });
 
-    const chatRequest = global.fetch.mock.calls[1][1];
+    const chatRequest = proxyAwareFetch.mock.calls[1][1];
     const machineOs = chatRequest.headers["Cosy-Machineos"];
     expect(validPlatforms).toContain(machineOs);
   });
@@ -1042,7 +1060,7 @@ describe("qoder-api Cosy headers", () => {
     const platforms = new Set();
 
     for (let i = 0; i < 10; i++) {
-      global.fetch
+      proxyAwareFetch
         .mockResolvedValueOnce(new Response(JSON.stringify({
           name: "User",
           id: "user-123",
@@ -1062,7 +1080,7 @@ describe("qoder-api Cosy headers", () => {
         provider: "qoder-api",
       });
 
-      const chatRequest = global.fetch.mock.calls[i * 2 + 1][1];
+      const chatRequest = proxyAwareFetch.mock.calls[i * 2 + 1][1];
       platforms.add(chatRequest.headers["Cosy-Machineos"]);
     }
 

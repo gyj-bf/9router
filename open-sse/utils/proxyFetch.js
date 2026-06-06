@@ -107,6 +107,7 @@ const MITM_BYPASS_HOSTS = [
   "codewhisperer.us-east-1.amazonaws.com",
   "api2.cursor.sh",
 ];
+const QODER_HOSTS = ["qoder.sh", "qoder.com"];
 const GOOGLE_DNS_SERVERS = ["8.8.8.8", "8.8.4.4"];
 const HTTPS_PORT = 443;
 const HTTP_SUCCESS_MIN = 200;
@@ -140,12 +141,34 @@ async function resolveRealIP(hostname) {
 }
 
 /**
- * Check if request should bypass MITM DNS redirect
+ * Check if request should bypass MITM DNS redirect.
+ * Matches against the static MITM_BYPASS_HOSTS list plus:
+ * - MITM_BYPASS_QODER=true → adds all *.qoder.sh and *.qoder.com hosts
+ * - MITM_BYPASS_EXTRA_HOSTS → comma-separated list of extra hosts
+ *
+ * Example: MITM_BYPASS_QODER=true
+ *          MITM_BYPASS_EXTRA_HOSTS=custom.host.com,another.host.com
  */
 function shouldBypassMitmDns(url) {
   try {
-    const hostname = new URL(url).hostname;
-    return MITM_BYPASS_HOSTS.some(host => hostname.includes(host));
+    const hostname = new URL(url).hostname.toLowerCase();
+
+    const matchesHost = (pattern) => {
+      const patternLower = pattern.toLowerCase();
+      return hostname === patternLower || hostname.endsWith(`.${patternLower}`);
+    };
+
+    if (MITM_BYPASS_HOSTS.some(matchesHost)) return true;
+
+    const bypassQoder = normalizeString(process.env.MITM_BYPASS_QODER).toLowerCase();
+    if (bypassQoder === "true" || bypassQoder === "1") {
+      if (QODER_HOSTS.some(matchesHost)) return true;
+    }
+
+    const extra = normalizeString(process.env.MITM_BYPASS_EXTRA_HOSTS);
+    if (!extra) return false;
+    return extra.split(",").map(h => h.trim().toLowerCase()).filter(Boolean)
+      .some(matchesHost);
   } catch { return false; }
 }
 
@@ -365,4 +388,5 @@ if (globalThis.fetch !== patchedFetch) {
   globalThis.fetch = patchedFetch;
 }
 
+export { shouldBypassMitmDns };
 export default patchedFetch;
