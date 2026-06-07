@@ -111,14 +111,14 @@ export default function OverviewCards({ stats }) {
   return (
     <div className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2 md:grid-cols-4 sm:gap-4">
       <AnimatedMetricCard
-        label="Total Requests"
+        label="Requests"
         value={stats.totalRequests}
         formatter={(value) => fmt(Math.round(value))}
         deltaFormatter={(value) => fmt(Math.round(value))}
         pulseKey={pulseKey}
       />
       <AnimatedMetricCard
-        label="Total Input Tokens"
+        label="Input Tokens"
         value={stats.totalPromptTokens}
         formatter={(value) => fmt(Math.round(value))}
         deltaFormatter={formatCompactDelta}
