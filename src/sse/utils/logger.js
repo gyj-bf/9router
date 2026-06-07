@@ -40,7 +40,7 @@ export function info(tag, message, data) {
 export function warn(tag, message, data) {
   if (LEVEL <= LOG_LEVELS.WARN) {
     const dataStr = data ? ` ${formatData(data)}` : "";
-    // console.warn(`[${formatTime()}] ⚠️  [${tag}] ${message}${dataStr}`);
+    console.log(`[${formatTime()}] ⚠️  [${tag}] ${message}${dataStr}`);
   }
 }
 
@@ -53,13 +53,13 @@ export function error(tag, message, data) {
 
 export function request(method, path, extra) {
   const dataStr = extra ? ` ${formatData(extra)}` : "";
-  console.log(`\x1b[36m[${formatTime()}] 📥 ${method} ${path}${dataStr}\x1b[0m`);
+  console.log(`[${formatTime()}] 📥 [REQUEST] ${method} ${path}${dataStr}\x1b[0m`);
 }
 
 export function response(status, duration, extra) {
   const icon = status < 400 ? "📤" : "💥";
   const dataStr = extra ? ` ${formatData(extra)}` : "";
-  console.log(`[${formatTime()}] ${icon} ${status} (${duration}ms)${dataStr}`);
+  console.log(`[${formatTime()}] ${icon} [RESPONSE] ${status} (${duration}ms)${dataStr}`);
 }
 
 export function stream(event, data) {
@@ -68,7 +68,7 @@ export function stream(event, data) {
 }
 
 export function proxy(message) {
-  console.log(`[${formatTime()}] 🌐 [PROXY FETCH] ${message}`);
+  console.log(`[${formatTime()}] 🌐 [PROXY] ${message}`);
 }
 
 export function rtk(message) {
@@ -81,6 +81,10 @@ export function pending(message) {
 
 export function usage(message) {
   console.log(`[${formatTime()}] 📊 [USAGE] ${message}`);
+}
+
+export function database(message) {
+  console.log(`[${formatTime()}] 💾 [DB] ${message}`);
 }
 
 // Mask sensitive data
