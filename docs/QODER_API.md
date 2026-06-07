@@ -259,7 +259,150 @@ Payload plaintext (before encoding) di `.qoder-chat-body.tmp`:
 }
 ```
 
-## 4. Enterprise Firewall Bypass (MITM DNS)
+## 4. Reasoning Mode (Thinking/Chain-of-Thought)
+
+9Router supports reasoning mode for Qoder models that have `is_reasoning: true` in their configuration (e.g., `dmodel`, `dfmodel`, `gm51model`). Reasoning mode enables chain-of-thought processing where the model shows its thinking process before providing the final answer.
+
+### Enabling Reasoning Mode
+
+Reasoning mode can be controlled via OpenAI-compatible parameters in the request body:
+
+**Enable reasoning:**
+```json
+{
+  "model": "qda/dmodel",
+  "messages": [{"role": "user", "content": "Solve this step by step"}],
+  "reasoning_effort": "high"
+}
+```
+
+**Supported parameters (any of these will enable reasoning):**
+- `reasoning_effort`: `"low"`, `"medium"`, `"high"` (enables), `"none"` (disables)
+- `reasoning.effort`: nested object format, same values
+- `thinking.type`: `"enabled"` (enables), `"disabled"` (disables)
+- `enable_thinking`: `true` (enables), `false` (disables)
+
+**Disable reasoning:**
+```json
+{
+  "model": "qda/dmodel",
+  "messages": [{"role": "user", "content": "Quick answer"}],
+  "reasoning_effort": "none"
+}
+```
+
+### How It Works
+
+When reasoning mode is enabled, 9Router:
+
+1. **Sets `is_reasoning: true`** in the `model_config` sent to Qoder API
+2. **Injects `reasoning_content` placeholders** on assistant messages in multi-turn conversations (required by DeepSeek/GLM reasoning models)
+3. **Sanitizes `tool_choice`** to `"auto"` if it's set to `"required"` or an object (reasoning models don't support forced tool usage)
+
+### Payload Example with Reasoning
+
+**Request to 9Router:**
+```json
+{
+  "model": "qda/dmodel",
+  "messages": [
+    {"role": "user", "content": "What is 2+2?"},
+    {"role": "assistant", "content": "4"},
+    {"role": "user", "content": "Explain your reasoning"}
+  ],
+  "reasoning_effort": "high"
+}
+```
+
+**Payload sent to Qoder API (plaintext before encoding):**
+```json
+{
+  "request_id": "...",
+  "session_id": "...",
+  "stream": true,
+  "user_id": "...",
+  "chat_task": "FREE_INPUT",
+  "model_config": {
+    "key": "dmodel",
+    "display_name": "DeepSeek V4 Pro",
+    "is_vl": false,
+    "is_reasoning": true
+  },
+  "chat_context": {
+    "extra": {
+      "modelConfig": {
+        "key": "dmodel",
+        "is_reasoning": true
+      }
+    }
+  },
+  "messages": [
+    {"role": "user", "content": "What is 2+2?"},
+    {
+      "role": "assistant",
+      "content": "4",
+      "reasoning_content": " "
+    },
+    {"role": "user", "content": "Explain your reasoning"}
+  ]
+}
+```
+
+Note the `reasoning_content: " "` placeholder injected into the assistant message. This is required by DeepSeek/GLM reasoning models for multi-turn conversations.
+
+### Tool Choice Sanitization
+
+Reasoning models don't support forced tool usage. If you send `tool_choice: "required"` or an object format while reasoning is enabled, 9Router automatically sanitizes it to `"auto"`:
+
+**Before (your request):**
+```json
+{
+  "model": "qda/dmodel",
+  "reasoning_effort": "high",
+  "tool_choice": "required",
+  "tools": [...]
+}
+```
+
+**After (sent to Qoder):**
+```json
+{
+  "model_config": {"is_reasoning": true},
+  "tool_choice": "auto",
+  "tools": [...]
+}
+```
+
+A warning is logged: `[Qoder API] Neutralizing tool_choice to 'auto' (reasoning mode active)`
+
+### Reasoning Models
+
+The following Qoder models support reasoning mode (configured with `is_reasoning: true`):
+
+- `dmodel` - DeepSeek V4 Pro
+- `dfmodel` - DeepSeek V4
+- `gm51model` - GLM 5.1
+
+Other models (`qmodel_latest`, `qmodel`, `kmodel`, `mmodel`, etc.) have `is_reasoning: false` by default but can be forced into reasoning mode using the parameters above.
+
+### Response Format
+
+When reasoning mode is active, Qoder API returns `reasoning_content` in the streaming response:
+
+```json
+{
+  "choices": [{
+    "delta": {
+      "reasoning_content": "Let me think step by step...",
+      "content": null
+    }
+  }]
+}
+```
+
+9Router passes this through to the client in OpenAI-compatible format. The `reasoning_content` field contains the model's thinking process, while `content` contains the final answer.
+
+## 5. Enterprise Firewall Bypass (MITM DNS)
 
 Some enterprise firewalls (FortiGate, etc.) perform DNS spoofing to intercept and inspect HTTPS traffic, which can cause `TypeError: terminated` errors when connecting to Qoder API.
 

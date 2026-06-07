@@ -71,6 +71,60 @@ function latestUserText(messages = []) {
   return "";
 }
 
+/**
+ * Detect user's reasoning intent from OpenAI-compatible request parameters.
+ * Returns: true (force-enable), false (force-disable), null (use model default).
+ */
+function detectReasoningFromBody(body) {
+  if (body.reasoning_effort && body.reasoning_effort !== "none") return true;
+  if (body.reasoning?.effort && body.reasoning.effort !== "none") return true;
+  if (body.thinking?.type === "enabled") return true;
+  if (body.enable_thinking === true) return true;
+
+  if (body.reasoning_effort === "none") return false;
+  if (body.reasoning?.effort === "none") return false;
+  if (body.thinking?.type === "disabled") return false;
+  if (body.enable_thinking === false) return false;
+
+  return null;
+}
+
+/**
+ * Inject reasoning_content placeholder on assistant messages for reasoning models.
+ * DeepSeek/GLM reasoning models require reasoning_content echoed back in multi-turn;
+ * clients in OpenAI format don't send it, so we inject a space to satisfy upstream validation.
+ */
+function injectReasoningPlaceholders(messages) {
+  return messages.map((msg) => {
+    if (msg?.role !== "assistant") return msg;
+    if (typeof msg.reasoning_content === "string" && msg.reasoning_content.length > 0) return msg;
+    return { ...msg, reasoning_content: " " };
+  });
+}
+
+/**
+ * Hoist system messages out of the messages array.
+ * Qoder API rejects system messages in the messages array; they must be
+ * passed as a top-level "system" field instead.
+ */
+function hoistSystemMessages(messages) {
+  if (!Array.isArray(messages) || messages.length === 0) {
+    return { messages: [], systemText: "" };
+  }
+  const systemParts = [];
+  const out = [];
+  for (const msg of messages) {
+    if (!msg || typeof msg !== "object") continue;
+    if (msg.role === "system") {
+      const text = textFromContent(msg.content);
+      if (text) systemParts.push(text);
+      continue;
+    }
+    out.push(msg);
+  }
+  return { messages: out, systemText: systemParts.join("\n\n") };
+}
+
 function mapMessage(message) {
   const mapped = { role: message.role };
   
@@ -100,6 +154,7 @@ function mapMessage(message) {
   if (message.role === "assistant") {
     mapped.content = textFromContent(message.content);
     if (Array.isArray(message.tool_calls)) mapped.tool_calls = message.tool_calls;
+    if (typeof message.reasoning_content === "string") mapped.reasoning_content = message.reasoning_content;
     return mapped;
   }
   
@@ -115,6 +170,7 @@ function mapMessage(message) {
 
 function buildModelConfig(modelKey, modelConfig = {}) {
   return {
+    ...modelConfig,
     display_name: modelConfig.display_name || modelConfig.name || modelKey,
     model: modelConfig.model || "",
     format: modelConfig.format || "openai",
@@ -124,13 +180,38 @@ function buildModelConfig(modelKey, modelConfig = {}) {
     url: modelConfig.url || "",
     source: modelConfig.source || "system",
     max_input_tokens: modelConfig.max_input_tokens || 180000,
-    ...modelConfig,
     key: modelKey,
   };
 }
 
+/**
+ * Sanitize tool_choice when reasoning mode is active.
+ * Qwen/Qoder reasoning models reject tool_choice: "required" or object format
+ * when thinking mode is enabled. Neutralize to "auto" to prevent API errors.
+ */
+function sanitizeToolChoiceForReasoning(body, isReasoningActive) {
+  if (!isReasoningActive) return body;
+
+  const toolChoice = body.tool_choice;
+  if (!toolChoice || toolChoice === "auto" || toolChoice === "none") return body;
+
+  const needsSanitize =
+    toolChoice === "required" ||
+    (typeof toolChoice === "object" && toolChoice !== null);
+
+  if (needsSanitize) {
+    logger.warn("Qoder API", "Neutralizing tool_choice to 'auto' (reasoning mode active)", {
+      original: toolChoice,
+    });
+    return { ...body, tool_choice: "auto" };
+  }
+
+  return body;
+}
+
 export function buildQoderApiPayload(body, { modelKey, modelConfig, userId, userType = "personal_standard" }) {
-  const messages = Array.isArray(body.messages) ? body.messages : [];
+  const allMessages = Array.isArray(body.messages) ? body.messages : [];
+  const { messages, systemText } = hoistSystemMessages(allMessages);
   const prompt = latestUserText(messages);
   const imageUrls = extractAllImages(messages);
   const hasImages = imageUrls.length > 0;
@@ -145,6 +226,15 @@ export function buildQoderApiPayload(body, { modelKey, modelConfig, userId, user
       urls: imageUrls.map(url => url.substring(0, 64) + (url.length > 64 ? '...' : ''))
     });
   }
+
+  const reasoningOverride = detectReasoningFromBody(body);
+  if (reasoningOverride !== null) {
+    modelConfigPayload.is_reasoning = reasoningOverride;
+  }
+
+  const isReasoningModel = Boolean(modelConfigPayload.is_reasoning);
+  body = sanitizeToolChoiceForReasoning(body, isReasoningModel);
+  const processedMessages = isReasoningModel ? injectReasoningPlaceholders(messages) : messages;
   
   const now = Date.now();
 
@@ -167,6 +257,7 @@ export function buildQoderApiPayload(body, { modelKey, modelConfig, userId, user
     session_type: "qodercli",
     agent_id: "agent_common",
     task_id: "common",
+    system: systemText,
     model_config: modelConfigPayload,
     business: {
       product: "cli",
@@ -174,7 +265,7 @@ export function buildQoderApiPayload(body, { modelKey, modelConfig, userId, user
       type: "agent",
       stage: "start",
       id: requestId,
-      name: prompt.length > 30 ? prompt.slice(0, 30) : prompt,
+      name: prompt.length > 100 ? prompt.slice(0, 100) : prompt,
       begin_at: now,
     },
     chat_context: {
@@ -183,20 +274,24 @@ export function buildQoderApiPayload(body, { modelKey, modelConfig, userId, user
       text: { type: "text", text: prompt },
       extra: {
         context: [],
-        modelConfig: { key: modelKey, is_reasoning: Boolean(modelConfigPayload.is_reasoning) },
+        modelConfig: { key: modelKey, is_reasoning: isReasoningModel },
         originalContent: { type: "text", text: prompt },
       },
       features: [],
     },
     parameters: {
-      max_tokens: body.max_tokens || DEFAULT_MAX_OUTPUT_TOKENS,
+      max_tokens: body.max_tokens || body.max_completion_tokens || DEFAULT_MAX_OUTPUT_TOKENS,
       temperature: body.temperature !== undefined ? body.temperature : DEFAULT_TEMPERATURE,
     },
-    messages: messages.map(mapMessage),
+    messages: processedMessages.map(mapMessage),
   };
 
   if (Array.isArray(body.tools) && body.tools.length > 0) {
     payload.tools = body.tools;
+  }
+
+  if (body.tool_choice !== undefined) {
+    payload.tool_choice = body.tool_choice;
   }
 
   return payload;

@@ -140,7 +140,7 @@ describe("qoder-api session helper", () => {
 import { QoderApiExecutor, buildQoderApiPayload } from "../../open-sse/executors/qoderApi.js";
 
 describe("qoder-api executor request mapping", () => {
-  it("builds a Qoder payload preserving system messages, multi-turn history, tools, and tool results", () => {
+  it("builds a Qoder payload hoisting system messages, preserving multi-turn history, tools, and tool results", () => {
     const body = {
       model: "qoder-api/lite",
       stream: true,
@@ -174,8 +174,9 @@ describe("qoder-api executor request mapping", () => {
     expect(payload.chat_context.extra.modelConfig).toEqual({ key: "lite", is_reasoning: false });
     expect(payload.parameters.max_tokens).toBe(32768);
     expect(payload.tools).toEqual(body.tools);
-    expect(payload.messages.map((message) => message.role)).toEqual(["system", "user", "assistant", "tool", "user"]);
-    expect(payload.messages[4].content).toBe("Continue.");
+    expect(payload.system).toBe("You are concise.");
+    expect(payload.messages.map((message) => message.role)).toEqual(["user", "assistant", "tool", "user"]);
+    expect(payload.messages[3].content).toBe("Continue.");
     expect(payload.chat_context.text.text).toBe("Continue.");
   });
 
@@ -220,6 +221,767 @@ describe("qoder-api executor request mapping", () => {
     expect(QoderApiExecutor.normalizeModelKey("qoder-api/lite")).toBe("lite");
     expect(QoderApiExecutor.normalizeModelKey("qda/auto")).toBe("auto");
     expect(QoderApiExecutor.normalizeModelKey("lite")).toBe("lite");
+  });
+
+  it("hoists multiple system messages into top-level system field", () => {
+    const body = {
+      messages: [
+        { role: "system", content: "You are helpful." },
+        { role: "user", content: "Hello" },
+        { role: "system", content: "Be concise." },
+        { role: "assistant", content: "Hi!" },
+      ],
+    };
+
+    const payload = buildQoderApiPayload(body, {
+      modelKey: "lite",
+      modelConfig: { key: "lite", source: "system" },
+      userId: "user-123",
+    });
+
+    expect(payload.system).toBe("You are helpful.\n\nBe concise.");
+    expect(payload.messages.map((m) => m.role)).toEqual(["user", "assistant"]);
+  });
+
+  it("handles empty system messages gracefully", () => {
+    const body = {
+      messages: [
+        { role: "system", content: "" },
+        { role: "user", content: "Hello" },
+      ],
+    };
+
+    const payload = buildQoderApiPayload(body, {
+      modelKey: "lite",
+      modelConfig: { key: "lite", source: "system" },
+      userId: "user-123",
+    });
+
+    expect(payload.system).toBe("");
+    expect(payload.messages.map((m) => m.role)).toEqual(["user"]);
+  });
+
+  it("handles messages with no system messages", () => {
+    const body = {
+      messages: [
+        { role: "user", content: "Hello" },
+        { role: "assistant", content: "Hi!" },
+      ],
+    };
+
+    const payload = buildQoderApiPayload(body, {
+      modelKey: "lite",
+      modelConfig: { key: "lite", source: "system" },
+      userId: "user-123",
+    });
+
+    expect(payload.system).toBe("");
+    expect(payload.messages.map((m) => m.role)).toEqual(["user", "assistant"]);
+  });
+});
+
+describe("qoder-api reasoning mode", () => {
+  const baseParams = {
+    modelKey: "qmodel_latest",
+    modelConfig: {
+      display_name: "Qwen 3.7 Max",
+      model: "qwen3-max-latest",
+      format: "openai",
+      is_vl: false,
+      is_reasoning: false,
+      source: "system",
+      max_input_tokens: 180000,
+    },
+    userId: "test-user-id",
+    userType: "personal_standard",
+  };
+
+  it("detects reasoning_effort parameter and enables reasoning mode", () => {
+    const body = {
+      messages: [{ role: "user", content: "Think step by step" }],
+      reasoning_effort: "high",
+    };
+
+    const payload = buildQoderApiPayload(body, baseParams);
+
+    expect(payload.model_config.is_reasoning).toBe(true);
+    expect(payload.chat_context.extra.modelConfig.is_reasoning).toBe(true);
+  });
+
+  it("detects reasoning.effort nested parameter", () => {
+    const body = {
+      messages: [{ role: "user", content: "Think step by step" }],
+      reasoning: { effort: "medium" },
+    };
+
+    const payload = buildQoderApiPayload(body, baseParams);
+
+    expect(payload.model_config.is_reasoning).toBe(true);
+  });
+
+  it("detects thinking.type enabled parameter", () => {
+    const body = {
+      messages: [{ role: "user", content: "Think step by step" }],
+      thinking: { type: "enabled" },
+    };
+
+    const payload = buildQoderApiPayload(body, baseParams);
+
+    expect(payload.model_config.is_reasoning).toBe(true);
+  });
+
+  it("detects enable_thinking parameter", () => {
+    const body = {
+      messages: [{ role: "user", content: "Think step by step" }],
+      enable_thinking: true,
+    };
+
+    const payload = buildQoderApiPayload(body, baseParams);
+
+    expect(payload.model_config.is_reasoning).toBe(true);
+  });
+
+  it("respects reasoning_effort: none to disable reasoning", () => {
+    const reasoningModelParams = {
+      ...baseParams,
+      modelConfig: {
+        ...baseParams.modelConfig,
+        is_reasoning: true,
+      },
+    };
+
+    const body = {
+      messages: [{ role: "user", content: "Quick answer" }],
+      reasoning_effort: "none",
+    };
+
+    const payload = buildQoderApiPayload(body, reasoningModelParams);
+
+    expect(payload.model_config.is_reasoning).toBe(false);
+  });
+
+  it("respects thinking.type: disabled to disable reasoning", () => {
+    const reasoningModelParams = {
+      ...baseParams,
+      modelConfig: {
+        ...baseParams.modelConfig,
+        is_reasoning: true,
+      },
+    };
+
+    const body = {
+      messages: [{ role: "user", content: "Quick answer" }],
+      thinking: { type: "disabled" },
+    };
+
+    const payload = buildQoderApiPayload(body, reasoningModelParams);
+
+    expect(payload.model_config.is_reasoning).toBe(false);
+  });
+
+  it("uses model config default when no reasoning parameters present", () => {
+    const reasoningModelParams = {
+      ...baseParams,
+      modelConfig: {
+        ...baseParams.modelConfig,
+        is_reasoning: true,
+      },
+    };
+
+    const body = {
+      messages: [{ role: "user", content: "Hello" }],
+    };
+
+    const payload = buildQoderApiPayload(body, reasoningModelParams);
+
+    expect(payload.model_config.is_reasoning).toBe(true);
+  });
+
+  it("injects reasoning_content placeholder on assistant messages when reasoning is active", () => {
+    const reasoningModelParams = {
+      ...baseParams,
+      modelConfig: {
+        ...baseParams.modelConfig,
+        is_reasoning: true,
+      },
+    };
+
+    const body = {
+      messages: [
+        { role: "user", content: "Question" },
+        { role: "assistant", content: "Answer" },
+        { role: "user", content: "Follow up" },
+      ],
+    };
+
+    const payload = buildQoderApiPayload(body, reasoningModelParams);
+
+    expect(payload.messages[1].role).toBe("assistant");
+    expect(payload.messages[1].reasoning_content).toBe(" ");
+  });
+
+  it("preserves existing reasoning_content on assistant messages", () => {
+    const reasoningModelParams = {
+      ...baseParams,
+      modelConfig: {
+        ...baseParams.modelConfig,
+        is_reasoning: true,
+      },
+    };
+
+    const body = {
+      messages: [
+        { role: "user", content: "Question" },
+        { role: "assistant", content: "Answer", reasoning_content: "My reasoning..." },
+        { role: "user", content: "Follow up" },
+      ],
+    };
+
+    const payload = buildQoderApiPayload(body, reasoningModelParams);
+
+    expect(payload.messages[1].reasoning_content).toBe("My reasoning...");
+  });
+
+  it("does not inject reasoning_content when reasoning is disabled", () => {
+    const body = {
+      messages: [
+        { role: "user", content: "Question" },
+        { role: "assistant", content: "Answer" },
+        { role: "user", content: "Follow up" },
+      ],
+    };
+
+    const payload = buildQoderApiPayload(body, baseParams);
+
+    expect(payload.messages[1].reasoning_content).toBeUndefined();
+  });
+
+  it("sanitizes tool_choice to auto when reasoning is active and tool_choice is required", () => {
+    const reasoningModelParams = {
+      ...baseParams,
+      modelConfig: {
+        ...baseParams.modelConfig,
+        is_reasoning: true,
+      },
+    };
+
+    const body = {
+      messages: [{ role: "user", content: "Use a tool" }],
+      tool_choice: "required",
+      tools: [{ type: "function", function: { name: "lookup" } }],
+    };
+
+    const payload = buildQoderApiPayload(body, reasoningModelParams);
+
+    expect(payload.tool_choice).toBe("auto");
+  });
+
+  it("sanitizes tool_choice object to auto when reasoning is active", () => {
+    const reasoningModelParams = {
+      ...baseParams,
+      modelConfig: {
+        ...baseParams.modelConfig,
+        is_reasoning: true,
+      },
+    };
+
+    const body = {
+      messages: [{ role: "user", content: "Use a tool" }],
+      tool_choice: { type: "function", function: { name: "lookup" } },
+      tools: [{ type: "function", function: { name: "lookup" } }],
+    };
+
+    const payload = buildQoderApiPayload(body, reasoningModelParams);
+
+    expect(payload.tool_choice).toBe("auto");
+  });
+
+  it("preserves tool_choice auto when reasoning is active", () => {
+    const reasoningModelParams = {
+      ...baseParams,
+      modelConfig: {
+        ...baseParams.modelConfig,
+        is_reasoning: true,
+      },
+    };
+
+    const body = {
+      messages: [{ role: "user", content: "Use a tool" }],
+      tool_choice: "auto",
+      tools: [{ type: "function", function: { name: "lookup" } }],
+    };
+
+    const payload = buildQoderApiPayload(body, reasoningModelParams);
+
+    expect(payload.tool_choice).toBe("auto");
+  });
+
+  it("preserves tool_choice none when reasoning is active", () => {
+    const reasoningModelParams = {
+      ...baseParams,
+      modelConfig: {
+        ...baseParams.modelConfig,
+        is_reasoning: true,
+      },
+    };
+
+    const body = {
+      messages: [{ role: "user", content: "No tools" }],
+      tool_choice: "none",
+    };
+
+    const payload = buildQoderApiPayload(body, reasoningModelParams);
+
+    expect(payload.tool_choice).toBe("none");
+  });
+
+  it("does not sanitize tool_choice when reasoning is disabled", () => {
+    const body = {
+      messages: [{ role: "user", content: "Use a tool" }],
+      tool_choice: "required",
+      tools: [{ type: "function", function: { name: "lookup" } }],
+    };
+
+    const payload = buildQoderApiPayload(body, baseParams);
+
+    expect(payload.tool_choice).toBe("required");
+  });
+
+  it("handles conflicting reasoning signals (enable wins over disable)", () => {
+    const body = {
+      messages: [{ role: "user", content: "Think" }],
+      reasoning_effort: "high",
+      thinking: { type: "disabled" },
+    };
+
+    const payload = buildQoderApiPayload(body, baseParams);
+
+    expect(payload.model_config.is_reasoning).toBe(true);
+  });
+
+  it("accepts reasoning_effort: low", () => {
+    const body = {
+      messages: [{ role: "user", content: "Think briefly" }],
+      reasoning_effort: "low",
+    };
+
+    const payload = buildQoderApiPayload(body, baseParams);
+
+    expect(payload.model_config.is_reasoning).toBe(true);
+  });
+
+  it("accepts reasoning_effort: medium", () => {
+    const body = {
+      messages: [{ role: "user", content: "Think moderately" }],
+      reasoning_effort: "medium",
+    };
+
+    const payload = buildQoderApiPayload(body, baseParams);
+
+    expect(payload.model_config.is_reasoning).toBe(true);
+  });
+
+  it("does not inject reasoning_content on user messages", () => {
+    const reasoningModelParams = {
+      ...baseParams,
+      modelConfig: {
+        ...baseParams.modelConfig,
+        is_reasoning: true,
+      },
+    };
+
+    const body = {
+      messages: [
+        { role: "user", content: "Question 1" },
+        { role: "assistant", content: "Answer 1" },
+        { role: "user", content: "Question 2" },
+      ],
+    };
+
+    const payload = buildQoderApiPayload(body, reasoningModelParams);
+
+    expect(payload.messages[0].reasoning_content).toBeUndefined();
+    expect(payload.messages[1].reasoning_content).toBe(" ");
+    expect(payload.messages[2].reasoning_content).toBeUndefined();
+  });
+
+  it("injects reasoning_content on multiple assistant messages", () => {
+    const reasoningModelParams = {
+      ...baseParams,
+      modelConfig: {
+        ...baseParams.modelConfig,
+        is_reasoning: true,
+      },
+    };
+
+    const body = {
+      messages: [
+        { role: "user", content: "Q1" },
+        { role: "assistant", content: "A1" },
+        { role: "user", content: "Q2" },
+        { role: "assistant", content: "A2" },
+        { role: "user", content: "Q3" },
+      ],
+    };
+
+    const payload = buildQoderApiPayload(body, reasoningModelParams);
+
+    expect(payload.messages[1].reasoning_content).toBe(" ");
+    expect(payload.messages[3].reasoning_content).toBe(" ");
+  });
+
+  it("preserves empty string reasoning_content", () => {
+    const reasoningModelParams = {
+      ...baseParams,
+      modelConfig: {
+        ...baseParams.modelConfig,
+        is_reasoning: true,
+      },
+    };
+
+    const body = {
+      messages: [
+        { role: "user", content: "Q" },
+        { role: "assistant", content: "A", reasoning_content: "" },
+        { role: "user", content: "Follow up" },
+      ],
+    };
+
+    const payload = buildQoderApiPayload(body, reasoningModelParams);
+
+    expect(payload.messages[1].reasoning_content).toBe(" ");
+  });
+
+  it("preserves null reasoning_content as undefined", () => {
+    const reasoningModelParams = {
+      ...baseParams,
+      modelConfig: {
+        ...baseParams.modelConfig,
+        is_reasoning: true,
+      },
+    };
+
+    const body = {
+      messages: [
+        { role: "user", content: "Q" },
+        { role: "assistant", content: "A", reasoning_content: null },
+        { role: "user", content: "Follow up" },
+      ],
+    };
+
+    const payload = buildQoderApiPayload(body, reasoningModelParams);
+
+    expect(payload.messages[1].reasoning_content).toBe(" ");
+  });
+
+  it("works with reasoning and images together", () => {
+    const reasoningModelParams = {
+      ...baseParams,
+      modelConfig: {
+        ...baseParams.modelConfig,
+        is_reasoning: true,
+      },
+    };
+
+    const body = {
+      messages: [
+        { role: "user", content: "Analyze this" },
+        {
+          role: "assistant",
+          content: "Analysis",
+        },
+        {
+          role: "user",
+          content: [
+            { type: "text", text: "What about this?" },
+            { type: "image_url", image_url: { url: "https://example.com/img.jpg" } },
+          ],
+        },
+      ],
+    };
+
+    const payload = buildQoderApiPayload(body, reasoningModelParams);
+
+    expect(payload.model_config.is_reasoning).toBe(true);
+    expect(payload.model_config.is_vl).toBe(true);
+    expect(payload.messages[1].reasoning_content).toBe(" ");
+    expect(payload.image_urls).toEqual(["https://example.com/img.jpg"]);
+  });
+
+  it("works with reasoning and tools together", () => {
+    const reasoningModelParams = {
+      ...baseParams,
+      modelConfig: {
+        ...baseParams.modelConfig,
+        is_reasoning: true,
+      },
+    };
+
+    const body = {
+      messages: [
+        { role: "user", content: "Use a tool" },
+        {
+          role: "assistant",
+          content: "",
+          tool_calls: [
+            {
+              id: "call_1",
+              type: "function",
+              function: { name: "lookup", arguments: "{}" },
+            },
+          ],
+        },
+        { role: "tool", tool_call_id: "call_1", content: "result" },
+        { role: "user", content: "Thanks" },
+      ],
+      tools: [{ type: "function", function: { name: "lookup" } }],
+      tool_choice: "auto",
+    };
+
+    const payload = buildQoderApiPayload(body, reasoningModelParams);
+
+    expect(payload.model_config.is_reasoning).toBe(true);
+    expect(payload.messages[1].reasoning_content).toBe(" ");
+    expect(payload.messages[1].tool_calls).toBeDefined();
+    expect(payload.tools).toHaveLength(1);
+    expect(payload.tool_choice).toBe("auto");
+  });
+
+  it("integrates system hoisting with reasoning mode", () => {
+    const reasoningModelParams = {
+      ...baseParams,
+      modelConfig: {
+        ...baseParams.modelConfig,
+        is_reasoning: true,
+      },
+    };
+
+    const body = {
+      messages: [
+        { role: "system", content: "You are helpful." },
+        { role: "user", content: "Question" },
+        { role: "assistant", content: "Answer" },
+        { role: "user", content: "Follow up" },
+      ],
+      reasoning_effort: "high",
+    };
+
+    const payload = buildQoderApiPayload(body, reasoningModelParams);
+
+    expect(payload.system).toBe("You are helpful.");
+    expect(payload.messages.map((m) => m.role)).toEqual(["user", "assistant", "user"]);
+    expect(payload.model_config.is_reasoning).toBe(true);
+    expect(payload.messages[1].reasoning_content).toBe(" ");
+  });
+
+  it("handles system message with array content", () => {
+    const body = {
+      messages: [
+        {
+          role: "system",
+          content: [
+            { type: "text", text: "Be helpful" },
+            { type: "text", text: "and concise" },
+          ],
+        },
+        { role: "user", content: "Hello" },
+      ],
+    };
+
+    const payload = buildQoderApiPayload(body, baseParams);
+
+    expect(payload.system).toBe("Be helpful\nand concise");
+    expect(payload.messages.map((m) => m.role)).toEqual(["user"]);
+  });
+
+  it("handles reasoning with nested reasoning object containing extra properties", () => {
+    const body = {
+      messages: [{ role: "user", content: "Think" }],
+      reasoning: {
+        effort: "high",
+        budget_tokens: 10000,
+        summary: "auto",
+      },
+    };
+
+    const payload = buildQoderApiPayload(body, baseParams);
+
+    expect(payload.model_config.is_reasoning).toBe(true);
+  });
+
+  it("handles enable_thinking: false to disable reasoning", () => {
+    const reasoningModelParams = {
+      ...baseParams,
+      modelConfig: {
+        ...baseParams.modelConfig,
+        is_reasoning: true,
+      },
+    };
+
+    const body = {
+      messages: [{ role: "user", content: "Quick" }],
+      enable_thinking: false,
+    };
+
+    const payload = buildQoderApiPayload(body, reasoningModelParams);
+
+    expect(payload.model_config.is_reasoning).toBe(false);
+  });
+
+  it("handles reasoning.effort: none to disable reasoning", () => {
+    const reasoningModelParams = {
+      ...baseParams,
+      modelConfig: {
+        ...baseParams.modelConfig,
+        is_reasoning: true,
+      },
+    };
+
+    const body = {
+      messages: [{ role: "user", content: "Quick" }],
+      reasoning: { effort: "none" },
+    };
+
+    const payload = buildQoderApiPayload(body, reasoningModelParams);
+
+    expect(payload.model_config.is_reasoning).toBe(false);
+  });
+
+  it("does not inject reasoning_content on tool messages", () => {
+    const reasoningModelParams = {
+      ...baseParams,
+      modelConfig: {
+        ...baseParams.modelConfig,
+        is_reasoning: true,
+      },
+    };
+
+    const body = {
+      messages: [
+        { role: "user", content: "Use tool" },
+        {
+          role: "assistant",
+          content: "",
+          tool_calls: [
+            { id: "call_1", type: "function", function: { name: "lookup", arguments: "{}" } },
+          ],
+        },
+        { role: "tool", tool_call_id: "call_1", content: "result" },
+        { role: "user", content: "Thanks" },
+      ],
+    };
+
+    const payload = buildQoderApiPayload(body, reasoningModelParams);
+
+    expect(payload.messages[1].reasoning_content).toBe(" ");
+    expect(payload.messages[2].reasoning_content).toBeUndefined();
+  });
+
+  it("handles all messages being system messages", () => {
+    const body = {
+      messages: [
+        { role: "system", content: "System 1" },
+        { role: "system", content: "System 2" },
+      ],
+    };
+
+    const payload = buildQoderApiPayload(body, baseParams);
+
+    expect(payload.system).toBe("System 1\n\nSystem 2");
+    expect(payload.messages).toEqual([]);
+  });
+
+  it("preserves tool_calls when injecting reasoning_content", () => {
+    const reasoningModelParams = {
+      ...baseParams,
+      modelConfig: {
+        ...baseParams.modelConfig,
+        is_reasoning: true,
+      },
+    };
+
+    const toolCalls = [
+      {
+        id: "call_1",
+        type: "function",
+        function: { name: "lookup", arguments: '{"q":"test"}' },
+      },
+    ];
+
+    const body = {
+      messages: [
+        { role: "user", content: "Use tool" },
+        { role: "assistant", content: "", tool_calls: toolCalls },
+        { role: "user", content: "Continue" },
+      ],
+    };
+
+    const payload = buildQoderApiPayload(body, reasoningModelParams);
+
+    expect(payload.messages[1].reasoning_content).toBe(" ");
+    expect(payload.messages[1].tool_calls).toEqual(toolCalls);
+    expect(payload.messages[1].content).toBe("");
+  });
+});
+
+describe("qoder-api max_completion_tokens parameter", () => {
+  const baseParams = {
+    modelKey: "qmodel_latest",
+    modelConfig: {
+      display_name: "Qwen 3.7 Max",
+      model: "qwen3-max-latest",
+      format: "openai",
+      is_vl: false,
+      is_reasoning: false,
+      source: "system",
+      max_input_tokens: 180000,
+    },
+    userId: "test-user-id",
+    userType: "personal_standard",
+  };
+
+  it("uses max_completion_tokens when max_tokens is not present", () => {
+    const body = {
+      messages: [{ role: "user", content: "Hello" }],
+      max_completion_tokens: 2048,
+    };
+
+    const payload = buildQoderApiPayload(body, baseParams);
+
+    expect(payload.parameters.max_tokens).toBe(2048);
+  });
+
+  it("prefers max_tokens over max_completion_tokens when both present", () => {
+    const body = {
+      messages: [{ role: "user", content: "Hello" }],
+      max_tokens: 4096,
+      max_completion_tokens: 2048,
+    };
+
+    const payload = buildQoderApiPayload(body, baseParams);
+
+    expect(payload.parameters.max_tokens).toBe(4096);
+  });
+
+  it("uses default when neither max_tokens nor max_completion_tokens present", () => {
+    const body = {
+      messages: [{ role: "user", content: "Hello" }],
+    };
+
+    const payload = buildQoderApiPayload(body, baseParams);
+
+    expect(payload.parameters.max_tokens).toBe(32768);
+  });
+
+  it("accepts max_completion_tokens: 0", () => {
+    const body = {
+      messages: [{ role: "user", content: "Hello" }],
+      max_completion_tokens: 0,
+    };
+
+    const payload = buildQoderApiPayload(body, baseParams);
+
+    expect(payload.parameters.max_tokens).toBe(32768);
   });
 });
 
