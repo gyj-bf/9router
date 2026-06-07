@@ -126,6 +126,10 @@ function hoistSystemMessages(messages) {
 }
 
 function mapMessage(message) {
+  if (!message || typeof message !== "object") {
+    return { role: "user", content: "" };
+  }
+  
   const mapped = { role: message.role };
   
   if (message.role === "user") {
@@ -328,12 +332,13 @@ export function wrapQoderApiSSE(response, model = "qoder-api/lite") {
       const statusValue = typeof envelope.statusCodeValue === "number" ? envelope.statusCodeValue : 200;
       const inner = typeof envelope.body === "string" ? envelope.body : "";
       if (statusValue !== 200) {
+        logger.error("Qoder API", "Upstream error in stream", { statusValue, body: inner });
         const errChunk = JSON.stringify({
           id: `qoder-api-error-${Date.now()}`,
           object: "chat.completion.chunk",
           created: Math.floor(Date.now() / 1000),
           model,
-          choices: [{ index: 0, delta: { content: `\n[Qoder API error ${statusValue}: ${inner || "upstream error"}]` }, finish_reason: "stop" }],
+          choices: [{ index: 0, delta: { content: `\n[Upstream provider error (code ${statusValue})]` }, finish_reason: "stop" }],
         });
         controller.enqueue(encoder.encode(`data: ${errChunk}\n\n`));
         emitDone(controller);
@@ -345,9 +350,17 @@ export function wrapQoderApiSSE(response, model = "qoder-api/lite") {
         return;
       }
       controller.enqueue(encoder.encode(`data: ${inner.replace(/\r?\n/g, "")}\n\n`));
-    } catch {
-      const errChunk = JSON.stringify({ error: { message: "Invalid Qoder API stream frame", type: "qoder_api_stream_error" } });
+    } catch (parseErr) {
+      logger.warn("Qoder API", "Failed to parse stream frame", { dataLength: data.length, error: parseErr.message });
+      const errChunk = JSON.stringify({
+        id: `qoder-api-error-${Date.now()}`,
+        object: "chat.completion.chunk",
+        created: Math.floor(Date.now() / 1000),
+        model,
+        choices: [{ index: 0, delta: { content: "\n[Stream parse error]" }, finish_reason: "stop" }],
+      });
       controller.enqueue(encoder.encode(`data: ${errChunk}\n\n`));
+      emitDone(controller);
     }
   };
 
@@ -395,49 +408,184 @@ export class QoderApiExecutor {
   }
 
   async ensureSession(credentials, onCredentialsRefreshed, proxyOptions = null) {
+    if (!credentials?.apiKey) {
+      logger.error("Qoder API", "Missing API key in credentials");
+      throw new Error("Qoder API key is required");
+    }
+
     const providerSpecificData = credentials?.providerSpecificData || {};
     const cached = providerSpecificData.qoderApiSession;
-    if (isQoderApiSessionValid(cached) && cached.userId && cached.securityOauthToken) return cached;
-
-    const session = await exchangeQoderApiToken(credentials?.apiKey, cached || {}, proxyOptions);
-    const nextProviderSpecificData = {
-      ...providerSpecificData,
-      qoderApiSession: session,
-    };
-    credentials.providerSpecificData = nextProviderSpecificData;
-    if (onCredentialsRefreshed) {
-      await onCredentialsRefreshed({
-        apiKey: credentials.apiKey,
-        providerSpecificData: nextProviderSpecificData,
-      });
+    
+    if (isQoderApiSessionValid(cached) && cached.userId && cached.securityOauthToken) {
+      return cached;
     }
-    return session;
+    
+    try {
+      const session = await exchangeQoderApiToken(credentials?.apiKey, cached || {}, proxyOptions);
+      
+      const nextProviderSpecificData = {
+        ...providerSpecificData,
+        qoderApiSession: session,
+      };
+      credentials.providerSpecificData = nextProviderSpecificData;
+      
+      if (onCredentialsRefreshed) {
+        await onCredentialsRefreshed({
+          apiKey: credentials.apiKey,
+          providerSpecificData: nextProviderSpecificData,
+        });
+      }
+      return session;
+    } catch (error) {
+      logger.error("Qoder API", "Failed to exchange API key for session", {
+        error: error.message,
+        stack: error.stack,
+      });
+      throw error;
+    }
   }
 
   async execute({ model, body, credentials, provider, onCredentialsRefreshed, proxyOptions = null }) {
-    const session = await this.ensureSession(credentials || {}, onCredentialsRefreshed, proxyOptions);
+    const requestId = crypto.randomUUID();
+
+    let session;
+    try {
+      session = await this.ensureSession(credentials || {}, onCredentialsRefreshed, proxyOptions);
+    } catch (error) {
+      logger.error("Qoder API", "Session initialization failed", {
+        requestId,
+        error: error.message,
+        stack: error.stack,
+      });
+      const errorResponse = new Response(
+        JSON.stringify({ 
+          error: { 
+            message: "Authentication failed. Please check your API key",
+            type: "authentication_error",
+            code: "auth_failed",
+          } 
+        }),
+        { 
+          status: 401, 
+          headers: { "Content-Type": "application/json" } 
+        }
+      );
+      return { 
+        response: errorResponse, 
+        url: QODER_CHAT_URL_ENCODED, 
+        headers: {}, 
+        transformedBody: body 
+      };
+    }
+
     const modelKey = QoderApiExecutor.normalizeModelKey(model || body?.model);
     const modelConfig = QoderApiExecutor.getModelConfig(modelKey);
-    const transformedBody = buildQoderApiPayload(body || {}, {
-      modelKey,
-      modelConfig,
-      userId: session.userId,
-      userType: session.userType || "personal_standard",
-    });
 
-    const encodedBody = qoderEncodeBody(Buffer.from(JSON.stringify(transformedBody), "utf8"));
-    const encodedBodyBuffer = Buffer.from(encodedBody, "latin1");
-    const cosyHeaders = buildCosyHeaders(encodedBodyBuffer, QODER_CHAT_URL_ENCODED, {
-      userId: session.userId,
-      authToken: session.securityOauthToken,
-      name: session.name || "",
-      email: session.email || "",
-      machineId: session.machineId || "",
-      machineToken: session.machineToken || "",
-      machineType: session.machineType || "",
-      cosyVersion: QODER_COSY_VERSION,
-      machineOs: QODER_MACHINE_OS_OPTIONS[Math.floor(Math.random() * QODER_MACHINE_OS_OPTIONS.length)],
-    });
+    let transformedBody;
+    try {
+      transformedBody = buildQoderApiPayload(body || {}, {
+        modelKey,
+        modelConfig,
+        userId: session.userId,
+        userType: session.userType || "personal_standard",
+      });
+    } catch (error) {
+      logger.error("Qoder API", "Failed to build request payload", {
+        requestId,
+        error: error.message,
+        stack: error.stack,
+      });
+      const errorResponse = new Response(
+        JSON.stringify({ 
+          error: { 
+            message: "Invalid request format",
+            type: "invalid_request_error",
+            code: "invalid_request",
+          } 
+        }),
+        { 
+          status: 400, 
+          headers: { "Content-Type": "application/json" } 
+        }
+      );
+      return { 
+        response: errorResponse, 
+        url: QODER_CHAT_URL_ENCODED, 
+        headers: {}, 
+        transformedBody: body 
+      };
+    }
+
+    let encodedBodyBuffer;
+    try {
+      const encodedBody = qoderEncodeBody(Buffer.from(JSON.stringify(transformedBody), "utf8"));
+      encodedBodyBuffer = Buffer.from(encodedBody, "latin1");
+    } catch (error) {
+      logger.error("Qoder API", "Failed to encode request body", {
+        requestId,
+        error: error.message,
+        stack: error.stack,
+      });
+      const errorResponse = new Response(
+        JSON.stringify({ 
+          error: { 
+            message: "Internal processing error",
+            type: "server_error",
+            code: "encoding_failed",
+          } 
+        }),
+        { 
+          status: 500, 
+          headers: { "Content-Type": "application/json" } 
+        }
+      );
+      return { 
+        response: errorResponse, 
+        url: QODER_CHAT_URL_ENCODED, 
+        headers: {}, 
+        transformedBody 
+      };
+    }
+
+    let cosyHeaders;
+    try {
+      cosyHeaders = buildCosyHeaders(encodedBodyBuffer, QODER_CHAT_URL_ENCODED, {
+        userId: session.userId,
+        authToken: session.securityOauthToken,
+        name: session.name || "",
+        email: session.email || "",
+        machineId: session.machineId || "",
+        machineToken: session.machineToken || "",
+        machineType: session.machineType || "",
+        cosyVersion: QODER_COSY_VERSION,
+        machineOs: QODER_MACHINE_OS_OPTIONS[Math.floor(Math.random() * QODER_MACHINE_OS_OPTIONS.length)],
+      });
+    } catch (error) {
+      logger.error("Qoder API", "Failed to build COSY headers", {
+        requestId,
+        error: error.message,
+        stack: error.stack,
+      });
+      const errorResponse = new Response(
+        JSON.stringify({ 
+          error: { 
+            message: "Authentication failed",
+            type: "authentication_error",
+            code: "auth_failed",
+          } 
+        }),
+        { 
+          status: 401, 
+          headers: { "Content-Type": "application/json" } 
+        }
+      );
+      return { 
+        response: errorResponse, 
+        url: QODER_CHAT_URL_ENCODED, 
+        headers: {}, 
+        transformedBody 
+      };
+    }
 
     const headers = {
       "Content-Type": "application/json",
@@ -449,14 +597,73 @@ export class QoderApiExecutor {
       ...cosyHeaders,
     };
 
-    const response = await proxyAwareFetch(QODER_CHAT_URL_ENCODED, {
-      method: "POST",
-      headers,
-      body: encodedBodyBuffer,
-    }, proxyOptions);
+    let response;
+    try {
+      response = await proxyAwareFetch(QODER_CHAT_URL_ENCODED, {
+        method: "POST",
+        headers,
+        body: encodedBodyBuffer,
+      }, proxyOptions);
+    } catch (error) {
+      logger.error("Qoder API", "Network request failed", {
+        requestId,
+        error: error.message,
+        stack: error.stack,
+      });
+      const errorResponse = new Response(
+        JSON.stringify({ 
+          error: { 
+            message: "Upstream service unavailable",
+            type: "server_error",
+            code: "network_error",
+          } 
+        }),
+        { 
+          status: 503, 
+          headers: { "Content-Type": "application/json" } 
+        }
+      );
+      return { 
+        response: errorResponse, 
+        url: QODER_CHAT_URL_ENCODED, 
+        headers, 
+        transformedBody 
+      };
+    }
 
     if (!response.ok) {
-      return { response, url: QODER_CHAT_URL_ENCODED, headers, transformedBody };
+      let errorBody = "";
+      try {
+        errorBody = await response.text();
+      } catch {}
+      
+      logger.error("Qoder API", "Upstream error response", {
+        requestId,
+        status: response.status,
+        statusText: response.statusText,
+        body: errorBody,
+      });
+      
+      const errorResponse = new Response(
+        JSON.stringify({ 
+          error: { 
+            message: `Upstream provider returned ${response.status}`,
+            type: "upstream_error",
+            code: "upstream_error",
+          } 
+        }),
+        { 
+          status: response.status >= 500 ? 502 : response.status, 
+          headers: { "Content-Type": "application/json" } 
+        }
+      );
+      
+      return { 
+        response: errorResponse, 
+        url: QODER_CHAT_URL_ENCODED, 
+        headers, 
+        transformedBody 
+      };
     }
 
     return {

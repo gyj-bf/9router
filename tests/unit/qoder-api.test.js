@@ -4,8 +4,25 @@ vi.mock("../../open-sse/utils/proxyFetch.js", () => ({
   proxyAwareFetch: vi.fn(),
 }));
 
+vi.mock("../../src/lib/qoder/encoding.js", async (importOriginal) => {
+  const actual = await importOriginal();
+  return {
+    ...actual,
+    qoderEncodeBody: vi.fn(actual.qoderEncodeBody),
+  };
+});
+
+vi.mock("../../src/lib/qoder/cosy.js", async (importOriginal) => {
+  const actual = await importOriginal();
+  return {
+    ...actual,
+    buildCosyHeaders: vi.fn(actual.buildCosyHeaders),
+  };
+});
+
 import { proxyAwareFetch } from "../../open-sse/utils/proxyFetch.js";
 import { qoderEncodeBody } from "../../src/lib/qoder/encoding.js";
+import { buildCosyHeaders } from "../../src/lib/qoder/cosy.js";
 import {
   exchangeQoderApiToken,
   isQoderApiSessionValid,
@@ -1847,5 +1864,398 @@ describe("qoder-api Cosy headers", () => {
     }
 
     expect(platforms.size).toBeGreaterThan(1);
+  });
+});
+
+describe("qoder-api error handling and logging", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-06-02T00:00:00.000Z"));
+    vi.clearAllMocks();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  describe("ensureSession error handling", () => {
+    it("throws error when API key is missing", async () => {
+      const executor = new QoderApiExecutor();
+      const credentials = {};
+
+      await expect(executor.ensureSession(credentials))
+        .rejects.toThrow("Qoder API key is required");
+    });
+
+    it("throws error when API key is null", async () => {
+      const executor = new QoderApiExecutor();
+      const credentials = { apiKey: null };
+
+      await expect(executor.ensureSession(credentials))
+        .rejects.toThrow("Qoder API key is required");
+    });
+
+    it("returns cached session when valid", async () => {
+      const executor = new QoderApiExecutor();
+      const cachedSession = {
+        userId: "user-123",
+        securityOauthToken: "token-123",
+        expiresAt: Date.now() + 3600000,
+      };
+      const credentials = {
+        apiKey: "test-key",
+        providerSpecificData: {
+          qoderApiSession: cachedSession,
+        },
+      };
+
+      const session = await executor.ensureSession(credentials);
+
+      expect(session).toBe(cachedSession);
+      expect(proxyAwareFetch).not.toHaveBeenCalled();
+    });
+
+    it("exchanges token when cached session is expired", async () => {
+      const executor = new QoderApiExecutor();
+      const expiredSession = {
+        userId: "user-123",
+        securityOauthToken: "token-123",
+        expiresAt: Date.now() - 1000,
+      };
+      const credentials = {
+        apiKey: "test-key",
+        providerSpecificData: {
+          qoderApiSession: expiredSession,
+        },
+      };
+
+      proxyAwareFetch.mockResolvedValueOnce(new Response(JSON.stringify({
+        id: "user-456",
+        securityOauthToken: "new-token",
+        expireTime: Date.now() + 60_000,
+      }), { status: 200, headers: { "content-type": "application/json" } }));
+
+      const session = await executor.ensureSession(credentials);
+
+      expect(session.userId).toBe("user-456");
+      expect(proxyAwareFetch).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe("execute error handling", () => {
+    it("returns 401 when session initialization fails", async () => {
+      const executor = new QoderApiExecutor();
+      const credentials = {};
+
+      const result = await executor.execute({
+        model: "qoder-api/lite",
+        body: { messages: [{ role: "user", content: "test" }] },
+        credentials,
+        provider: "qoder-api",
+      });
+
+      expect(result.response.status).toBe(401);
+      const errorBody = await result.response.json();
+      expect(errorBody.error.type).toBe("authentication_error");
+      expect(errorBody.error.message).toBe("Authentication failed. Please check your API key");
+    });
+
+    it("returns 500 when body encoding fails", async () => {
+      qoderEncodeBody.mockImplementationOnce(() => {
+        throw new Error("encoding boom");
+      });
+
+      const executor = new QoderApiExecutor();
+      const credentials = {
+        apiKey: "test-key",
+        providerSpecificData: {
+          qoderApiSession: {
+            userId: "user-123",
+            securityOauthToken: "token-123",
+            expiresAt: Date.now() + 3600000,
+          },
+        },
+      };
+
+      const result = await executor.execute({
+        model: "qoder-api/lite",
+        body: { messages: [{ role: "user", content: "test" }] },
+        credentials,
+        provider: "qoder-api",
+      });
+
+      expect(result.response.status).toBe(500);
+      const errorBody = await result.response.json();
+      expect(errorBody.error.type).toBe("server_error");
+      expect(errorBody.error.message).toBe("Internal processing error");
+
+      qoderEncodeBody.mockRestore();
+    });
+
+    it("returns 502 when Qoder API returns 5xx status", async () => {
+      proxyAwareFetch
+        .mockResolvedValueOnce(new Response(JSON.stringify({
+          id: "user-123",
+          securityOauthToken: "token-123",
+          expireTime: Date.now() + 60_000,
+        }), { status: 200, headers: { "content-type": "application/json" } }))
+        .mockResolvedValueOnce(new Response("Internal Server Error", { 
+          status: 500, 
+          statusText: "Internal Server Error" 
+        }));
+
+      const executor = new QoderApiExecutor();
+      const credentials = { apiKey: "test-key", providerSpecificData: {} };
+
+      const result = await executor.execute({
+        model: "qoder-api/lite",
+        body: { messages: [{ role: "user", content: "test" }] },
+        credentials,
+        provider: "qoder-api",
+      });
+
+      expect(result.response.status).toBe(502);
+      const errorBody = await result.response.json();
+      expect(errorBody.error.type).toBe("upstream_error");
+      expect(errorBody.error.message).toBe("Upstream provider returned 500");
+    });
+
+    it("returns 503 when network request fails", async () => {
+      proxyAwareFetch
+        .mockResolvedValueOnce(new Response(JSON.stringify({
+          id: "user-123",
+          securityOauthToken: "token-123",
+          expireTime: Date.now() + 60_000,
+        }), { status: 200, headers: { "content-type": "application/json" } }))
+        .mockRejectedValueOnce(new Error("Network error"));
+
+      const executor = new QoderApiExecutor();
+      const credentials = { apiKey: "test-key", providerSpecificData: {} };
+
+      const result = await executor.execute({
+        model: "qoder-api/lite",
+        body: { messages: [{ role: "user", content: "test" }] },
+        credentials,
+        provider: "qoder-api",
+      });
+
+      expect(result.response.status).toBe(503);
+      const errorBody = await result.response.json();
+      expect(errorBody.error.type).toBe("server_error");
+      expect(errorBody.error.message).toBe("Upstream service unavailable");
+    });
+
+    it("returns 401 when COSY header building fails", async () => {
+      buildCosyHeaders.mockImplementationOnce(() => {
+        throw new Error("cosy signing boom");
+      });
+
+      const executor = new QoderApiExecutor();
+      const credentials = { 
+        apiKey: "test-key", 
+        providerSpecificData: {
+          qoderApiSession: {
+            userId: "user-123",
+            securityOauthToken: "token-123",
+            expiresAt: Date.now() + 3600000,
+          },
+        }
+      };
+
+      const body = { messages: [{ role: "user", content: "test" }] };
+
+      const result = await executor.execute({
+        model: "qoder-api/lite",
+        body,
+        credentials,
+        provider: "qoder-api",
+      });
+
+      expect(result.response.status).toBe(401);
+      const errorBody = await result.response.json();
+      expect(errorBody.error.type).toBe("authentication_error");
+      expect(errorBody.error.message).toBe("Authentication failed");
+
+      buildCosyHeaders.mockRestore();
+    });
+  });
+
+  describe("logging behavior", () => {
+    it("does not log info or debug level messages on success", async () => {
+      const logger = await import("../../src/sse/utils/logger.js");
+      const infoSpy = vi.spyOn(logger, "info");
+      const debugSpy = vi.spyOn(logger, "debug");
+
+      proxyAwareFetch
+        .mockResolvedValueOnce(new Response(JSON.stringify({
+          id: "user-123",
+          securityOauthToken: "token-123",
+          expireTime: Date.now() + 60_000,
+        }), { status: 200, headers: { "content-type": "application/json" } }))
+        .mockResolvedValueOnce(new Response("data: [DONE]\n\n", { status: 200, headers: { "content-type": "text/event-stream" } }));
+
+      const executor = new QoderApiExecutor();
+      const credentials = { apiKey: "test-key", providerSpecificData: {} };
+
+      await executor.execute({
+        model: "qoder-api/lite",
+        body: { messages: [{ role: "user", content: "test" }] },
+        credentials,
+        provider: "qoder-api",
+      });
+
+      expect(infoSpy).not.toHaveBeenCalled();
+      expect(debugSpy).not.toHaveBeenCalled();
+
+      infoSpy.mockRestore();
+      debugSpy.mockRestore();
+    });
+
+    it("logs error when session initialization fails", async () => {
+      const logger = await import("../../src/sse/utils/logger.js");
+      const errorSpy = vi.spyOn(logger, "error");
+
+      const executor = new QoderApiExecutor();
+      const credentials = {};
+
+      await executor.execute({
+        model: "qoder-api/lite",
+        body: { messages: [{ role: "user", content: "test" }] },
+        credentials,
+        provider: "qoder-api",
+      });
+
+      expect(errorSpy).toHaveBeenCalledWith(
+        "Qoder API",
+        "Session initialization failed",
+        expect.objectContaining({
+          requestId: expect.any(String),
+          error: expect.any(String),
+        })
+      );
+
+      errorSpy.mockRestore();
+    });
+
+    it("logs error when Qoder API returns non-OK status", async () => {
+      const logger = await import("../../src/sse/utils/logger.js");
+      const errorSpy = vi.spyOn(logger, "error");
+
+      proxyAwareFetch
+        .mockResolvedValueOnce(new Response(JSON.stringify({
+          id: "user-123",
+          securityOauthToken: "token-123",
+          expireTime: Date.now() + 60_000,
+        }), { status: 200, headers: { "content-type": "application/json" } }))
+        .mockResolvedValueOnce(new Response("Error", { 
+          status: 500, 
+          statusText: "Internal Server Error" 
+        }));
+
+      const executor = new QoderApiExecutor();
+      const credentials = { apiKey: "test-key", providerSpecificData: {} };
+
+      await executor.execute({
+        model: "qoder-api/lite",
+        body: { messages: [{ role: "user", content: "test" }] },
+        credentials,
+        provider: "qoder-api",
+      });
+
+      expect(errorSpy).toHaveBeenCalledWith(
+        "Qoder API",
+        "Upstream error response",
+        expect.objectContaining({
+          requestId: expect.any(String),
+          status: 500,
+          statusText: "Internal Server Error",
+        })
+      );
+
+      errorSpy.mockRestore();
+    });
+
+    it("returns 503 when network request fails", async () => {
+      const logger = await import("../../src/sse/utils/logger.js");
+      const errorSpy = vi.spyOn(logger, "error");
+
+      proxyAwareFetch
+        .mockResolvedValueOnce(new Response(JSON.stringify({
+          id: "user-123",
+          securityOauthToken: "token-123",
+          expireTime: Date.now() + 60_000,
+        }), { status: 200, headers: { "content-type": "application/json" } }))
+        .mockRejectedValueOnce(new Error("Network error"));
+
+      const executor = new QoderApiExecutor();
+      const credentials = { apiKey: "test-key", providerSpecificData: {} };
+
+      const result = await executor.execute({
+        model: "qoder-api/lite",
+        body: { messages: [{ role: "user", content: "test" }] },
+        credentials,
+        provider: "qoder-api",
+      });
+
+      expect(result.response.status).toBe(503);
+      const errorBody = await result.response.json();
+      expect(errorBody.error.message).toBe("Upstream service unavailable");
+      expect(errorBody.error.type).toBe("server_error");
+      expect(errorBody.error.code).toBe("network_error");
+
+      expect(errorSpy).toHaveBeenCalledWith(
+        "Qoder API",
+        "Network request failed",
+        expect.objectContaining({
+          requestId: expect.any(String),
+          error: "Network error",
+          stack: expect.any(String),
+        })
+      );
+
+      errorSpy.mockRestore();
+    });
+
+    it("logs error when body encoding fails", async () => {
+      const logger = await import("../../src/sse/utils/logger.js");
+      const errorSpy = vi.spyOn(logger, "error");
+
+      qoderEncodeBody.mockImplementationOnce(() => {
+        throw new Error("encoding boom");
+      });
+
+      const executor = new QoderApiExecutor();
+      const credentials = {
+        apiKey: "test-key",
+        providerSpecificData: {
+          qoderApiSession: {
+            userId: "user-123",
+            securityOauthToken: "token-123",
+            expiresAt: Date.now() + 3600000,
+          },
+        },
+      };
+
+      await executor.execute({
+        model: "qoder-api/lite",
+        body: { messages: [{ role: "user", content: "test" }] },
+        credentials,
+        provider: "qoder-api",
+      });
+
+      expect(errorSpy).toHaveBeenCalledWith(
+        "Qoder API",
+        "Failed to encode request body",
+        expect.objectContaining({
+          requestId: expect.any(String),
+          error: expect.any(String),
+          stack: expect.any(String),
+        })
+      );
+
+      errorSpy.mockRestore();
+      qoderEncodeBody.mockRestore();
+    });
   });
 });
