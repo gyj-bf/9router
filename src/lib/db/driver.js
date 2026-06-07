@@ -1,4 +1,5 @@
 import { ensureDirs, DATA_FILE } from "./paths.js";
+import * as logger from "../../sse/utils/logger.js";
 
 // Use global to survive Next.js dev hot-reload (module state resets on reload)
 if (!global._dbAdapter) global._dbAdapter = { instance: null, initPromise: null, logged: false };
@@ -64,7 +65,7 @@ async function initAdapter() {
   if (!adapter) throw new Error("[DB] No SQLite driver available (bun/better/node/sql.js all failed)");
 
   if (!state.logged) {
-    console.log(`[DB] Driver: ${adapter.driver} | file: ${DATA_FILE}`);
+    logger.database(`Driver: ${adapter.driver} | file: ${DATA_FILE}`);
     state.logged = true;
   }
 
