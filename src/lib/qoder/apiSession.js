@@ -121,6 +121,7 @@ export async function exchangeQoderApiToken(token, options = {}, proxyOptions = 
 
 export function isQoderApiSessionValid(session, refreshMarginMs = DEFAULT_REFRESH_MARGIN_MS) {
   if (!session || typeof session !== "object") return false;
+  if (!session.userId || !session.securityOauthToken) return false;
   if (!Number.isFinite(session.expiresAt)) return false;
   return session.expiresAt - Date.now() > refreshMarginMs;
 }

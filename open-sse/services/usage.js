@@ -4,6 +4,15 @@
 
 import { CLIENT_METADATA, getPlatformUserAgent } from "../config/appConstants.js";
 import { proxyAwareFetch } from "../utils/proxyFetch.js";
+import { exchangeQoderApiToken, isQoderApiSessionValid } from "../../src/lib/qoder/apiSession.js";
+import { buildCosyHeaders } from "../../src/lib/qoder/cosy.js";
+import * as logger from "../../src/sse/utils/logger.js";
+import {
+  QODER_ACTIVITY_URL,
+  QODER_COSY_VERSION,
+  QODER_MACHINE_OS_OPTIONS,
+  QODER_QUOTA_USAGE_URL,
+} from "../../src/lib/qoder/constants.js";
 
 // GitHub API config
 const GITHUB_CONFIG = {
@@ -79,6 +88,8 @@ export async function getUsageForProvider(connection, proxyOptions = null) {
       return await getKiroUsage(accessToken, providerSpecificData, proxyOptions);
     case "qoder":
       return await getQoderUsage(accessToken, proxyOptions);
+    case "qoder-api":
+      return await getQoderApiUsage(apiKey, providerSpecificData, proxyOptions);
     case "qwen":
       return await getQwenUsage(accessToken, providerSpecificData);
     case "iflow":
@@ -125,7 +136,7 @@ function parseResetTime(resetValue) {
 
     return null;
   } catch (error) {
-    console.warn(`Failed to parse reset time: ${resetValue}`, error);
+    logger.warn("Usage", "Failed to parse reset time", { value: resetValue, error: error.message });
     return null;
   }
 }
@@ -444,8 +455,8 @@ async function getAntigravityUsage(accessToken, providerSpecificData, proxyOptio
       subscriptionInfo,
     };
   } catch (error) {
-    console.error("[Antigravity Usage] Error:", error.message, error.cause);
-    return { message: `Antigravity error: ${error.message}` };
+    logger.error("Antigravity Usage", "Failed to fetch quota", { error: error.message });
+    return { message: "Antigravity connected. Unable to fetch quota." };
   }
 }
 
@@ -483,7 +494,7 @@ async function getAntigravitySubscriptionInfo(accessToken, proxyOptions = null) 
     if (!response.ok) return null;
     return await response.json();
   } catch (error) {
-    console.error("[Antigravity Subscription] Error:", error.message);
+    logger.error("Antigravity Usage", "Failed to fetch subscription info", { error: error.message });
     return null;
   } finally {
     clearTimeout(timeoutId);
@@ -550,7 +561,7 @@ async function getClaudeUsage(accessToken, proxyOptions = null) {
     }
 
     // Fallback: legacy settings + org usage endpoint
-    console.warn(`[Claude Usage] OAuth endpoint returned ${oauthResponse.status}, falling back to legacy`);
+    logger.warn("Claude Usage", `OAuth endpoint returned ${oauthResponse.status}, falling back to legacy`, { status: oauthResponse.status });
     return await getClaudeUsageLegacy(accessToken, proxyOptions);
   } catch (error) {
     return { message: `Claude connected. Unable to fetch usage: ${error.message}` };
@@ -1169,20 +1180,16 @@ async function getQoderUsage(accessToken, proxyOptions = null) {
       proxyOptions,
     );
     if (!response.ok) {
-      return { message: `Qoder connected. Usage fetch returned ${response.status}.` };
+      logger.warn("Qoder API Usage", `Credits quota returned ${response.status}`, { status: response.status });
+      return { message: `Qoder connected. Credits quota temporarily unavailable.` };
     }
     const body = await response.json().catch(() => null);
     if (!body) {
-      return { message: "Qoder connected. Usage response was not JSON." };
+      logger.warn("Qoder API Usage", "Credits quota response was not JSON");
+      return { message: "Qoder connected. Unable to read credits quota." };
     }
-    // Quota records live under `quotas`; scalar metadata
-    // (totalUsagePercentage, isQuotaExceeded, expiresAt) are surfaced as
-    // siblings so the dashboard parser doesn't try to render them as rows.
     const userQuota = body.userQuota || {};
     const orgQuota = body.orgResourcePackage || {};
-    // Qoder publishes a single absolute reset timestamp (`expiresAt` in ms);
-    // surface it on every quota record as ISO so the table can render
-    // "resets at" alongside used/total.
     const expiresAtMs = Number.isFinite(Number(body.expiresAt)) && Number(body.expiresAt) > 0
       ? Number(body.expiresAt)
       : null;
@@ -1210,6 +1217,179 @@ async function getQoderUsage(accessToken, proxyOptions = null) {
       expiresAt: expiresAtMs,
     };
   } catch (error) {
-    return { message: `Qoder connected. Unable to fetch usage: ${error.message}` };
+    logger.error("Qoder API Usage", "Failed to fetch credits quota", { error: error.message });
+    return { message: "Qoder connected. Unable to fetch credits quota." };
   }
+}
+
+async function getQoderApiUsage(apiKey, providerSpecificData, proxyOptions = null) {
+  if (!apiKey) {
+    return { message: "Qoder API usage unavailable: no API key" };
+  }
+
+  let session = providerSpecificData?.qoderApiSession;
+  if (!isQoderApiSessionValid(session)) {
+    try {
+      session = await exchangeQoderApiToken(apiKey, session || {}, proxyOptions);
+    } catch (error) {
+      logger.error("Qoder API Usage", "Session exchange failed", { error: error.message });
+      return { message: "Qoder API authentication failed. Please check your personal access token." };
+    }
+  }
+
+  if (!session?.userId || !session?.securityOauthToken) {
+    logger.warn("Qoder API Usage", "Session missing required fields", {
+      hasUserId: !!session?.userId,
+      hasToken: !!session?.securityOauthToken,
+    });
+    return { message: "Qoder API session is incomplete. Please reconnect." };
+  }
+
+  const machineOs = QODER_MACHINE_OS_OPTIONS[Math.floor(Math.random() * QODER_MACHINE_OS_OPTIONS.length)];
+  const cosyCreds = {
+    userId: session.userId,
+    authToken: session.securityOauthToken,
+    name: session.name || "",
+    email: session.email || "",
+    machineId: session.machineId || "",
+    machineToken: session.machineToken || "",
+    machineType: session.machineType || "",
+    cosyVersion: QODER_COSY_VERSION,
+    machineOs,
+  };
+
+  const [activityResult, creditsResult] = await Promise.allSettled([
+    fetchQoderActivity(cosyCreds, proxyOptions),
+    fetchQoderCredits(session.securityOauthToken, proxyOptions),
+  ]);
+
+  const quotas = {};
+
+  if (activityResult.status === "fulfilled" && activityResult.value) {
+    Object.assign(quotas, activityResult.value);
+  }
+
+  if (creditsResult.status === "fulfilled" && creditsResult.value) {
+    Object.assign(quotas, creditsResult.value);
+  }
+
+  if (Object.keys(quotas).length === 0) {
+    const activityErr = activityResult.status === "rejected" ? activityResult.reason?.message : null;
+    const creditsErr = creditsResult.status === "rejected" ? creditsResult.reason?.message : null;
+    logger.warn("Qoder API Usage", "Both quota endpoints failed", { activityErr, creditsErr });
+    return { message: "Qoder API connected. Unable to fetch quota data." };
+  }
+
+  return { quotas };
+}
+
+async function fetchQoderActivity(cosyCreds, proxyOptions) {
+  const cosyHeaders = buildCosyHeaders("", QODER_ACTIVITY_URL, cosyCreds);
+
+  const response = await proxyAwareFetch(
+    QODER_ACTIVITY_URL,
+    {
+      method: "GET",
+      headers: {
+        ...cosyHeaders,
+        Accept: "application/json",
+        "Accept-Language": "en-US",
+      },
+    },
+    proxyOptions,
+  );
+
+  if (!response.ok) {
+    logger.warn("Qoder API Usage", `Activity endpoint returned ${response.status}`, { status: response.status });
+    throw new Error(`activity endpoint returned ${response.status}`);
+  }
+
+  const body = await response.json().catch(() => null);
+  if (!body || body.code !== 0 || !Array.isArray(body.data?.activities)) {
+    logger.warn("Qoder API Usage", "Activity response was not parseable", { code: body?.code });
+    return null;
+  }
+
+  const quotas = {};
+  for (const activity of body.data.activities) {
+    if (activity.type !== "MODEL_FREE_QUOTA") continue;
+    if (!activity.eligible) continue;
+
+    const label = activity.modelName || activity.activityId || "Free Quota";
+    const resetAt = activity.resetAt
+      ? new Date(activity.resetAt).toISOString()
+      : null;
+
+    quotas[label] = {
+      used: Number(activity.used) || 0,
+      total: Number(activity.limit) || 0,
+      remaining: Number(activity.remaining) || 0,
+      unit: "requests",
+      resetAt,
+      modelKeys: activity.modelKeys || [],
+      activityEndAt: activity.activityEndAt
+        ? new Date(activity.activityEndAt).toISOString()
+        : null,
+    };
+  }
+
+  return Object.keys(quotas).length > 0 ? quotas : null;
+}
+
+async function fetchQoderCredits(securityOauthToken, proxyOptions) {
+  const response = await proxyAwareFetch(
+    QODER_QUOTA_USAGE_URL,
+    {
+      method: "GET",
+      headers: {
+        Authorization: `Bearer ${securityOauthToken}`,
+        Accept: "application/json",
+      },
+    },
+    proxyOptions,
+  );
+
+  if (!response.ok) {
+    logger.warn("Qoder API Usage", `Credits endpoint returned ${response.status}`, { status: response.status });
+    throw new Error(`credits endpoint returned ${response.status}`);
+  }
+
+  const body = await response.json().catch(() => null);
+  if (!body) {
+    logger.warn("Qoder API Usage", "Credits response was not JSON");
+    return null;
+  }
+
+  const userQuota = body.userQuota || {};
+  const orgQuota = body.orgResourcePackage || {};
+  const expiresAtMs = Number.isFinite(Number(body.expiresAt)) && Number(body.expiresAt) > 0
+    ? Number(body.expiresAt)
+    : null;
+  const resetAt = expiresAtMs ? new Date(expiresAtMs).toISOString() : null;
+
+  const quotas = {};
+
+  const userTotal = Number(userQuota.total) || 0;
+  if (userTotal > 0) {
+    quotas["Credits (Personal)"] = {
+      used: Number(userQuota.used) || 0,
+      total: userTotal,
+      remaining: Number(userQuota.remaining) || 0,
+      unit: userQuota.unit || "credits",
+      resetAt,
+    };
+  }
+
+  const orgTotal = Number(orgQuota.total) || 0;
+  if (orgTotal > 0) {
+    quotas["Credits (Organization)"] = {
+      used: Number(orgQuota.used) || 0,
+      total: orgTotal,
+      remaining: Number(orgQuota.remaining) || 0,
+      unit: orgQuota.unit || "credits",
+      resetAt,
+    };
+  }
+
+  return Object.keys(quotas).length > 0 ? quotas : null;
 }

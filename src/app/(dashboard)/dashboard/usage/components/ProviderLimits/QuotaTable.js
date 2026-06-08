@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { formatResetTime, getRemainingPercentage } from "./utils";
+import { formatResetTime, getRemainingPercentage, formatCampaignEndDate } from "./utils";
 
 const PAGE_SIZE = 10;
 
@@ -191,31 +191,43 @@ export default function QuotaTable({
                   </td>
 
                   <td className={`${cellPad} w-[25%]`}>
-                    {countdown !== "-" || resetDisplay ? (
-                      compact ? (
-                        <div
-                          className={`${resetPrimary} text-text-primary font-medium truncate`}
-                          title={resetDisplay || ""}
-                        >
-                          {countdown !== "-" ? `in ${countdown}` : resetDisplay}
-                        </div>
-                      ) : (
-                        <div className="space-y-0.5">
-                          {countdown !== "-" && (
-                            <div className={`${resetPrimary} text-text-primary font-medium`}>
-                              in {countdown}
+                    {(() => {
+                      const campaign = formatCampaignEndDate(quota.activityEndAt);
+                      return (
+                        <>
+                          {countdown !== "-" || resetDisplay ? (
+                            compact ? (
+                              <div
+                                className={`${resetPrimary} text-text-primary font-medium truncate`}
+                                title={resetDisplay || ""}
+                              >
+                                {countdown !== "-" ? `in ${countdown}` : resetDisplay}
+                              </div>
+                            ) : (
+                              <div className="space-y-0.5">
+                                {countdown !== "-" && (
+                                  <div className={`${resetPrimary} text-text-primary font-medium`}>
+                                    in {countdown}
+                                  </div>
+                                )}
+                                {resetDisplay && (
+                                  <div className={`${resetSecondary} text-text-muted`}>
+                                    {resetDisplay}
+                                  </div>
+                                )}
+                              </div>
+                            )
+                          ) : (
+                            <div className={`${resetPrimary} text-text-muted italic`}>N/A</div>
+                          )}
+                          {campaign && !campaign.expired && (
+                            <div className={`${resetSecondary} ${campaign.urgent ? "text-yellow-600 dark:text-yellow-400" : "text-text-muted"}`}>
+                              Ends {campaign.label}
                             </div>
                           )}
-                          {resetDisplay && (
-                            <div className={`${resetSecondary} text-text-muted`}>
-                              {resetDisplay}
-                            </div>
-                          )}
-                        </div>
-                      )
-                    ) : (
-                      <div className={`${resetPrimary} text-text-muted italic`}>N/A</div>
-                    )}
+                        </>
+                      );
+                    })()}
                   </td>
                 </tr>
               );

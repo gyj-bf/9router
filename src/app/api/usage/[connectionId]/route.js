@@ -6,6 +6,8 @@ import { getUsageForProvider } from "open-sse/services/usage.js";
 import { getExecutor } from "open-sse/executors/index.js";
 import { resolveConnectionProxyConfig } from "@/lib/network/connectionProxy";
 import { USAGE_APIKEY_PROVIDERS } from "@/shared/constants/providers";
+import { exchangeQoderApiToken, isQoderApiSessionValid } from "@/lib/qoder/apiSession";
+import * as logger from "@/sse/utils/logger";
 
 // Detect auth-expired messages returned by usage providers instead of throwing
 const AUTH_EXPIRED_PATTERNS = ["expired", "authentication", "unauthorized", "401", "re-authorize"];
@@ -140,10 +142,42 @@ export async function GET(request, { params }) {
         const result = await refreshAndUpdateCredentials(connection, false, proxyOptions);
         connection = result.connection;
       } catch (refreshError) {
-        console.error("[Usage API] Credential refresh failed:", refreshError);
+        logger.error("Usage API", "Credential refresh failed", {
+          provider: connection.provider,
+          error: refreshError.message,
+        });
         return Response.json({
-          error: `Credential refresh failed: ${refreshError.message}`
+          error: "Credential refresh failed. Please re-authorize the connection."
         }, { status: 401 });
+      }
+    }
+
+    // Qoder API key connections need a COSY session (userId + securityOauthToken)
+    // exchanged from the personal token. Persist it so auto-refresh reuses it.
+    if (connection.provider === "qoder-api" && connection.apiKey) {
+      const cachedSession = connection.providerSpecificData?.qoderApiSession;
+      if (!isQoderApiSessionValid(cachedSession)) {
+        try {
+          const session = await exchangeQoderApiToken(
+            connection.apiKey,
+            cachedSession || {},
+            proxyOptions,
+          );
+          const updatedPsd = {
+            ...(connection.providerSpecificData || {}),
+            qoderApiSession: session,
+          };
+          await updateProviderConnection(connection.id, {
+            providerSpecificData: updatedPsd,
+            updatedAt: new Date().toISOString(),
+          });
+          connection = { ...connection, providerSpecificData: updatedPsd };
+        } catch (sessionError) {
+          logger.warn("Usage API", "qoder-api session exchange failed", {
+            connectionId: connection.id,
+            error: sessionError.message,
+          });
+        }
       }
     }
 
@@ -158,14 +192,17 @@ export async function GET(request, { params }) {
         connection = retryResult.connection;
         usage = await getUsageForProvider(connection, proxyOptions);
       } catch (retryError) {
-        console.warn(`[Usage] ${connection.provider}: force refresh failed: ${retryError.message}`);
+        logger.warn("Usage API", "Force refresh failed", {
+          provider: connection.provider,
+          error: retryError.message,
+        });
       }
     }
 
     return Response.json(usage);
   } catch (error) {
     const provider = connection?.provider ?? "unknown";
-    console.warn(`[Usage] ${provider}: ${error.message}`);
-    return Response.json({ error: error.message }, { status: 500 });
+    logger.error("Usage API", "Unhandled error", { provider, error: error.message });
+    return Response.json({ error: "An unexpected error occurred." }, { status: 500 });
   }
 }

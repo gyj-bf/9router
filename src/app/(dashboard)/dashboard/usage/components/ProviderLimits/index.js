@@ -8,6 +8,7 @@ import { parseQuotaData, calculatePercentage } from "./utils";
 import Card from "@/shared/components/Card";
 import { EditConnectionModal } from "@/shared/components";
 import { USAGE_SUPPORTED_PROVIDERS } from "@/shared/constants/providers";
+import * as logger from "@/sse/utils/logger";
 
 function getConnectionLabel(connection) {
   const isEmail = (value) =>
@@ -184,7 +185,7 @@ function getQuotaCache() {
     const cached = window.localStorage.getItem(QUOTA_CACHE_KEY);
     return cached ? JSON.parse(cached) : {};
   } catch (error) {
-    console.error("Error reading quota cache:", error);
+    logger.error("Quota Cache", "Failed to read quota cache", { error: error.message });
     return {};
   }
 }
@@ -199,7 +200,7 @@ function setQuotaCache(connectionId, quotaEntry) {
     };
     window.localStorage.setItem(QUOTA_CACHE_KEY, JSON.stringify(cache));
   } catch (error) {
-    console.error("Error writing quota cache:", error);
+    logger.error("Quota Cache", "Failed to write quota cache", { error: error.message });
   }
 }
 
@@ -261,6 +262,7 @@ export default function ProviderLimits() {
 
   const intervalRef = useRef(null);
   const countdownRef = useRef(null);
+  const refreshAllRef = useRef(null);
 
   const fetchConnections = useCallback(
     async (targetPage = page) => {
@@ -293,7 +295,7 @@ export default function ProviderLimits() {
         setPage(getPaginationPageValue(data.pagination, targetPage));
         return connectionList;
       } catch (error) {
-        console.error("Error fetching connections:", error);
+        logger.error("Quota", "Failed to fetch connections", { error: error.message });
         setConnections([]);
         setProviderOptions([]);
         setPagination({ page: 1, pageSize, total: 0, totalPages: 1 });
@@ -310,10 +312,8 @@ export default function ProviderLimits() {
     setErrors((prev) => ({ ...prev, [connectionId]: null }));
 
     try {
-      console.log(
-        `[ProviderLimits] Fetching quota for ${provider} (${connectionId})`,
-      );
-      const response = await fetch(`/api/usage/${connectionId}`);
+      logger.debug("Quota", `Fetching quota for ${provider}`, { connectionId });
+      const response = await fetch(`/api/usage/${connectionId}`, { cache: "no-store" });
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
@@ -322,18 +322,13 @@ export default function ProviderLimits() {
         // Handle different error types gracefully
         if (response.status === 404) {
           // Connection not found - skip silently
-          console.warn(
-            `[ProviderLimits] Connection not found for ${provider}, skipping`,
-          );
+          logger.warn("Quota", `Connection not found for ${provider}, skipping`);
           return;
         }
 
         if (response.status === 401) {
           // Auth error - show message instead of throwing
-          console.warn(
-            `[ProviderLimits] Auth error for ${provider}:`,
-            errorMsg,
-          );
+          logger.warn("Quota", `Auth error for ${provider}`, { error: errorMsg });
           const quotaEntry = {
             quotas: [],
             message: errorMsg,
@@ -350,7 +345,7 @@ export default function ProviderLimits() {
       }
 
       const data = await response.json();
-      console.log(`[ProviderLimits] Got quota for ${provider}:`, data);
+      logger.debug("Quota", `Got quota for ${provider}`, { connectionId });
 
       // Parse quota data using provider-specific parser
       const parsedQuotas = parseQuotaData(provider, data);
@@ -368,10 +363,7 @@ export default function ProviderLimits() {
       }));
       setQuotaCache(connectionId, quotaEntry);
     } catch (error) {
-      console.error(
-        `[ProviderLimits] Error fetching quota for ${provider} (${connectionId}):`,
-        error,
-      );
+      logger.error("Quota", `Error fetching quota for ${provider}`, { connectionId, error: error.message });
       setErrors((prev) => ({
         ...prev,
         [connectionId]: error.message || "Failed to fetch quota",
@@ -424,14 +416,14 @@ export default function ProviderLimits() {
                 );
               }
             } catch (e) {
-              console.error("Error deleting cache entry:", e);
+              logger.error("Quota Cache", "Failed to delete cache entry", { error: e.message });
             }
           }
 
           await reconcileConnectionsPage(fetchConnections, page);
         }
       } catch (error) {
-        console.error("Error deleting connection:", error);
+        logger.error("Quota", "Failed to delete connection", { error: error.message });
       } finally {
         setDeletingId(null);
       }
@@ -456,7 +448,7 @@ export default function ProviderLimits() {
           await reconcileConnectionsPage(fetchConnections, page);
         }
       } catch (error) {
-        console.error("Error updating connection status:", error);
+        logger.error("Quota", "Failed to update connection status", { error: error.message });
       } finally {
         setTogglingId(null);
       }
@@ -484,7 +476,7 @@ export default function ProviderLimits() {
           }
         }
       } catch (error) {
-        console.error("Error saving connection:", error);
+        logger.error("Quota", "Failed to save connection", { error: error.message });
       }
     },
     [selectedConnection, fetchConnections, fetchQuota],
@@ -528,11 +520,15 @@ export default function ProviderLimits() {
 
       setLastUpdated(new Date());
     } catch (error) {
-      console.error("Error refreshing all providers:", error);
+      logger.error("Quota", "Failed to refresh all providers", { error: error.message });
     } finally {
       setRefreshingAll(false);
     }
   }, [refreshingAll, fetchConnections, fetchQuota, page]);
+
+  useEffect(() => {
+    refreshAllRef.current = refreshAll;
+  }, [refreshAll]);
 
   useEffect(() => {
     const initializeData = async () => {
@@ -587,7 +583,7 @@ export default function ProviderLimits() {
 
     // Main refresh interval
     intervalRef.current = setInterval(() => {
-      refreshAll();
+      refreshAllRef.current?.();
     }, REFRESH_INTERVAL_MS);
 
     // Countdown interval
@@ -602,7 +598,7 @@ export default function ProviderLimits() {
       if (intervalRef.current) clearInterval(intervalRef.current);
       if (countdownRef.current) clearInterval(countdownRef.current);
     };
-  }, [autoRefresh, refreshAll, hasHydratedAutoRefresh]);
+  }, [autoRefresh, hasHydratedAutoRefresh]);
 
   // Pause auto-refresh when tab is hidden (Page Visibility API)
   useEffect(() => {
@@ -618,7 +614,9 @@ export default function ProviderLimits() {
         }
       } else if (autoRefresh && hasHydratedAutoRefresh) {
         // Resume auto-refresh when tab becomes visible
-        intervalRef.current = setInterval(refreshAll, REFRESH_INTERVAL_MS);
+        intervalRef.current = setInterval(() => {
+          refreshAllRef.current?.();
+        }, REFRESH_INTERVAL_MS);
         countdownRef.current = setInterval(() => {
           setCountdown((prev) => (prev <= 1 ? 60 : prev - 1));
         }, 1000);
@@ -629,7 +627,7 @@ export default function ProviderLimits() {
     return () => {
       document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
-  }, [autoRefresh, refreshAll, hasHydratedAutoRefresh]);
+  }, [autoRefresh, hasHydratedAutoRefresh]);
 
   const sortedConnections = useMemo(
     () =>
@@ -669,7 +667,7 @@ export default function ProviderLimits() {
         );
         await reconcileConnectionsPage(fetchConnections, page);
       } catch (error) {
-        console.error("Error bulk toggling connections:", error);
+        logger.error("Quota", "Failed to bulk toggle connections", { error: error.message });
       } finally {
         setBulkToggling(false);
       }

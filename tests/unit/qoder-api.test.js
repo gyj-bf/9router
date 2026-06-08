@@ -28,6 +28,8 @@ import {
   isQoderApiSessionValid,
   redactQoderApiSession,
 } from "../../src/lib/qoder/apiSession.js";
+import { getUsageForProvider } from "../../open-sse/services/usage.js";
+import { formatCampaignEndDate } from "../../src/app/(dashboard)/dashboard/usage/components/ProviderLimits/utils.js";
 
 describe("qoder-api session helper", () => {
   beforeEach(() => {
@@ -134,9 +136,16 @@ describe("qoder-api session helper", () => {
   });
 
   it("validates sessions with a refresh margin", () => {
-    expect(isQoderApiSessionValid({ expiresAt: Date.now() + 120_000 })).toBe(true);
-    expect(isQoderApiSessionValid({ expiresAt: Date.now() + 10_000 })).toBe(false);
+    expect(isQoderApiSessionValid({ userId: "u1", securityOauthToken: "tok", expiresAt: Date.now() + 120_000 })).toBe(true);
+    expect(isQoderApiSessionValid({ userId: "u1", securityOauthToken: "tok", expiresAt: Date.now() + 10_000 })).toBe(false);
     expect(isQoderApiSessionValid(null)).toBe(false);
+  });
+
+  it("rejects sessions missing userId or securityOauthToken", () => {
+    expect(isQoderApiSessionValid({ expiresAt: Date.now() + 120_000 })).toBe(false);
+    expect(isQoderApiSessionValid({ userId: "", securityOauthToken: "tok", expiresAt: Date.now() + 120_000 })).toBe(false);
+    expect(isQoderApiSessionValid({ userId: "u1", securityOauthToken: "", expiresAt: Date.now() + 120_000 })).toBe(false);
+    expect(isQoderApiSessionValid({ userId: "u1", expiresAt: Date.now() + 120_000 })).toBe(false);
   });
 
   it("redacts sensitive Qoder session fields", () => {
@@ -2257,5 +2266,255 @@ describe("qoder-api error handling and logging", () => {
       errorSpy.mockRestore();
       qoderEncodeBody.mockRestore();
     });
+  });
+});
+
+// ── Quota Tracker: getUsageForProvider("qoder-api") ────────────────────────
+
+const VALID_QUOTA_SESSION = {
+  userId: "user-123",
+  securityOauthToken: "oauth-token-abc",
+  name: "Test User",
+  email: "test@example.com",
+  machineId: "machine-1",
+  machineToken: "machine-token-1",
+  machineType: "linux",
+  expiresAt: Date.now() + 3600_000,
+};
+
+const ACTIVITY_RESPONSE = {
+  code: 0,
+  msg: "ok",
+  data: {
+    activities: [
+      {
+        type: "MODEL_FREE_QUOTA",
+        activityId: "qwen3.7max_200_free_invoke",
+        modelName: "Qwen3.7-Max Free Calls",
+        modelKeys: ["qmodel_latest"],
+        limit: 200,
+        used: 2,
+        remaining: 198,
+        resetAt: 1780848000000,
+        eligible: true,
+        activityEndAt: 1788192000000,
+      },
+    ],
+    queryAt: 1780845256899,
+  },
+};
+
+const CREDITS_RESPONSE = {
+  userQuota: { total: 500, used: 152, remaining: 348, unit: "credits" },
+  orgResourcePackage: { total: 0, used: 0, remaining: 0 },
+  expiresAt: 1788192000000,
+};
+
+function makeQoderApiConnection(overrides = {}) {
+  return {
+    provider: "qoder-api",
+    apiKey: "pt-test-token",
+    providerSpecificData: { qoderApiSession: { ...VALID_QUOTA_SESSION } },
+    ...overrides,
+  };
+}
+
+describe("qoder-api quota tracker (getUsageForProvider)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("reuses cached session when valid and fetches both endpoints", async () => {
+    proxyAwareFetch
+      .mockResolvedValueOnce(new Response(JSON.stringify(ACTIVITY_RESPONSE), { status: 200, headers: { "content-type": "application/json" } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify(CREDITS_RESPONSE), { status: 200, headers: { "content-type": "application/json" } }));
+
+    const result = await getUsageForProvider(makeQoderApiConnection());
+
+    expect(result.quotas).toBeDefined();
+    expect(result.quotas["Qwen3.7-Max Free Calls"]).toEqual({
+      used: 2,
+      total: 200,
+      remaining: 198,
+      unit: "requests",
+      resetAt: new Date(1780848000000).toISOString(),
+      modelKeys: ["qmodel_latest"],
+      activityEndAt: new Date(1788192000000).toISOString(),
+    });
+    expect(result.quotas["Credits (Personal)"]).toEqual({
+      used: 152,
+      total: 500,
+      remaining: 348,
+      unit: "credits",
+      resetAt: new Date(1788192000000).toISOString(),
+    });
+  });
+
+  it("filters out non-MODEL_FREE_QUOTA and ineligible activities", async () => {
+    const mixed = {
+      code: 0,
+      data: {
+        activities: [
+          { type: "PROMO_BANNER", title: "Some promo" },
+          ACTIVITY_RESPONSE.data.activities[0],
+          { type: "MODEL_FREE_QUOTA", eligible: false, modelName: "Ineligible", limit: 100 },
+        ],
+        queryAt: Date.now(),
+      },
+    };
+    proxyAwareFetch
+      .mockResolvedValueOnce(new Response(JSON.stringify(mixed), { status: 200, headers: { "content-type": "application/json" } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify(CREDITS_RESPONSE), { status: 200, headers: { "content-type": "application/json" } }));
+
+    const result = await getUsageForProvider(makeQoderApiConnection());
+
+    expect(result.quotas["Qwen3.7-Max Free Calls"]).toBeDefined();
+    expect(result.quotas["Ineligible"]).toBeUndefined();
+  });
+
+  it("skips organization credits when total is 0", async () => {
+    proxyAwareFetch
+      .mockResolvedValueOnce(new Response(JSON.stringify(ACTIVITY_RESPONSE), { status: 200, headers: { "content-type": "application/json" } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify(CREDITS_RESPONSE), { status: 200, headers: { "content-type": "application/json" } }));
+
+    const result = await getUsageForProvider(makeQoderApiConnection());
+
+    expect(result.quotas["Credits (Personal)"]).toBeDefined();
+    expect(result.quotas["Credits (Organization)"]).toBeUndefined();
+  });
+
+  it("includes organization credits when total > 0", async () => {
+    const creditsWithOrg = {
+      ...CREDITS_RESPONSE,
+      orgResourcePackage: { total: 1000, used: 200, remaining: 800, unit: "credits" },
+    };
+    proxyAwareFetch
+      .mockResolvedValueOnce(new Response(JSON.stringify(ACTIVITY_RESPONSE), { status: 200, headers: { "content-type": "application/json" } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify(creditsWithOrg), { status: 200, headers: { "content-type": "application/json" } }));
+
+    const result = await getUsageForProvider(makeQoderApiConnection());
+
+    expect(result.quotas["Credits (Organization)"]).toEqual({
+      used: 200,
+      total: 1000,
+      remaining: 800,
+      unit: "credits",
+      resetAt: new Date(1788192000000).toISOString(),
+    });
+  });
+
+  it("returns activity quotas even when credits endpoint fails", async () => {
+    proxyAwareFetch
+      .mockResolvedValueOnce(new Response(JSON.stringify(ACTIVITY_RESPONSE), { status: 200, headers: { "content-type": "application/json" } }))
+      .mockResolvedValueOnce(new Response("forbidden", { status: 403 }));
+
+    const result = await getUsageForProvider(makeQoderApiConnection());
+
+    expect(result.quotas["Qwen3.7-Max Free Calls"]).toBeDefined();
+    expect(result.quotas["Credits (Personal)"]).toBeUndefined();
+  });
+
+  it("returns credits even when activity endpoint fails", async () => {
+    proxyAwareFetch
+      .mockResolvedValueOnce(new Response("error", { status: 500 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify(CREDITS_RESPONSE), { status: 200, headers: { "content-type": "application/json" } }));
+
+    const result = await getUsageForProvider(makeQoderApiConnection());
+
+    expect(result.quotas["Credits (Personal)"]).toBeDefined();
+    expect(result.quotas["Qwen3.7-Max Free Calls"]).toBeUndefined();
+  });
+
+  it("returns error message when both endpoints fail", async () => {
+    proxyAwareFetch
+      .mockResolvedValueOnce(new Response("error", { status: 500 }))
+      .mockResolvedValueOnce(new Response("error", { status: 500 }));
+
+    const result = await getUsageForProvider(makeQoderApiConnection());
+
+    expect(result.message).toBeDefined();
+    expect(result.quotas).toBeUndefined();
+  });
+
+  it("returns error when no API key provided", async () => {
+    const result = await getUsageForProvider({
+      provider: "qoder-api",
+      apiKey: null,
+      providerSpecificData: {},
+    });
+
+    expect(result.message).toContain("no API key");
+  });
+
+  it("calls activity endpoint with COSY headers and credits with Bearer", async () => {
+    proxyAwareFetch
+      .mockResolvedValueOnce(new Response(JSON.stringify(ACTIVITY_RESPONSE), { status: 200, headers: { "content-type": "application/json" } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify(CREDITS_RESPONSE), { status: 200, headers: { "content-type": "application/json" } }));
+
+    await getUsageForProvider(makeQoderApiConnection());
+
+    expect(buildCosyHeaders).toHaveBeenCalledWith(
+      "",
+      expect.stringContaining("/algo/api/v2/activity"),
+      expect.objectContaining({ userId: "user-123", authToken: "oauth-token-abc" }),
+    );
+
+    const creditsCall = proxyAwareFetch.mock.calls[1];
+    expect(creditsCall[0]).toContain("quota/usage");
+    expect(creditsCall[1].headers.Authorization).toBe("Bearer oauth-token-abc");
+  });
+});
+
+// ── formatCampaignEndDate ──────────────────────────────────────────────────
+
+describe("formatCampaignEndDate", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-06-15T12:00:00.000Z"));
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("returns null for null/undefined/empty input", () => {
+    expect(formatCampaignEndDate(null)).toBeNull();
+    expect(formatCampaignEndDate(undefined)).toBeNull();
+    expect(formatCampaignEndDate("")).toBeNull();
+  });
+
+  it("returns null for invalid date strings", () => {
+    expect(formatCampaignEndDate("not-a-date")).toBeNull();
+    expect(formatCampaignEndDate("abc123")).toBeNull();
+    expect(formatCampaignEndDate("////")).toBeNull();
+  });
+
+  it("returns expired for past dates", () => {
+    const result = formatCampaignEndDate("2026-06-01T00:00:00.000Z");
+    expect(result).toEqual({ label: "Ended", expired: true });
+  });
+
+  it("returns urgent label when within 7 days", () => {
+    const result = formatCampaignEndDate("2026-06-18T12:00:00.000Z");
+    expect(result.expired).toBe(false);
+    expect(result.urgent).toBe(true);
+    expect(result.label).toContain("left");
+    expect(result.label).toContain("Jun 18, 2026");
+  });
+
+  it("returns plain date when more than 7 days away", () => {
+    const result = formatCampaignEndDate("2026-07-15T12:00:00.000Z");
+    expect(result.expired).toBe(false);
+    expect(result.urgent).toBe(false);
+    expect(result.label).toBe("Jul 15, 2026");
+  });
+
+  it("treats exactly now as expired", () => {
+    const result = formatCampaignEndDate("2026-06-15T12:00:00.000Z");
+    expect(result.expired).toBe(true);
   });
 });

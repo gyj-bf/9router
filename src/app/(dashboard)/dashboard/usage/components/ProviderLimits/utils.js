@@ -185,6 +185,21 @@ export function parseQuotaData(provider, data) {
         }
         break;
 
+      case "qoder-api":
+        if (data.quotas) {
+          Object.entries(data.quotas).forEach(([name, quota]) => {
+            normalizedQuotas.push({
+              name,
+              used: quota.used || 0,
+              total: quota.total || 0,
+              unit: quota.unit,
+              resetAt: quota.resetAt || null,
+              activityEndAt: quota.activityEndAt || null,
+            });
+          });
+        }
+        break;
+
       case "claude":
         if (data.message) {
           // Handle error message case
@@ -241,4 +256,28 @@ export function parseQuotaData(provider, data) {
   }
 
   return normalizedQuotas;
+}
+
+export function formatCampaignEndDate(endDate) {
+  if (!endDate) return null;
+
+  try {
+    const date = new Date(endDate);
+    if (isNaN(date.getTime())) return null;
+    const now = new Date();
+    const diffMs = date - now;
+
+    if (diffMs <= 0) return { label: "Ended", expired: true };
+
+    const totalDays = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
+    const dateStr = date.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+
+    if (totalDays <= 7) {
+      return { label: `${totalDays}d left · ${dateStr}`, expired: false, urgent: true };
+    }
+
+    return { label: dateStr, expired: false, urgent: false };
+  } catch {
+    return null;
+  }
 }
