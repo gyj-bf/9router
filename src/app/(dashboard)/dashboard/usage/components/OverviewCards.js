@@ -139,7 +139,6 @@ export default function OverviewCards({ stats }) {
         formatter={fmtCost}
         deltaFormatter={fmtCost}
         valueClassName="text-warning"
-        helperText="Estimated, not actual billing"
         pulseKey={pulseKey}
         prefix="~"
       />
