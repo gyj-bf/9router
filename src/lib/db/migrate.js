@@ -7,6 +7,7 @@ import { getMetaSync, setMetaSync } from "./helpers/metaStore.js";
 import { makeBackupDir, backupFile, pruneOldBackups } from "./backup.js";
 import { getAppVersion } from "./version.js";
 import { stringifyJson } from "./helpers/jsonCol.js";
+import * as logger from "../../sse/utils/logger.js";
 
 // Marker file: prevents re-importing legacy JSON when user wipes data.sqlite.
 const MIGRATED_MARKER = path.join(DB_DIR, ".migrated-from-json");
@@ -33,7 +34,7 @@ function importWithAssertion(adapter, tableName, rows, insertFn, rowMeta) {
   }
   const inserted = adapter.get(`SELECT COUNT(*) as c FROM ${tableName}`)?.c ?? 0;
   if (inserted !== rows.length) {
-    console.warn(`[DB][migrate] ${tableName} row-count mismatch: expected ${rows.length}, got ${inserted}. Dropped:`, dropped);
+    logger.warn("DB Migrate", `${tableName} row-count mismatch`, { expected: rows.length, got: inserted, dropped });
     throw new MigrationAborted(`${tableName} row-count mismatch: expected ${rows.length}, got ${inserted}`, dropped);
   }
 }
@@ -70,7 +71,7 @@ function runVersionedMigrations(adapter) {
       setMetaSync(adapter, "schemaVersion", m.version);
     });
     lastApplied = m.version;
-    console.log(`[DB][migrate] applied #${m.version} ${m.name}`);
+    logger.info("DB Migrate", `Applied migration #${m.version} ${m.name}`);
   }
   return { applied: pending.length, from: current, to: lastApplied };
 }
@@ -94,9 +95,9 @@ function syncSchemaFromTables(adapter) {
           .trim();
         try {
           adapter.exec(`ALTER TABLE ${tableName} ADD COLUMN ${colName} ${safeDef}`);
-          console.log(`[DB][sync] +column ${tableName}.${colName}`);
+          logger.info("DB Sync", `Added column ${tableName}.${colName}`);
         } catch (e) {
-          console.warn(`[DB][sync] add column ${tableName}.${colName} failed: ${e.message}`);
+          logger.warn("DB Sync", `Add column ${tableName}.${colName} failed`, { error: e.message });
         }
       }
     }
@@ -251,7 +252,7 @@ export async function runMigrationOnce(adapter) {
       });
     } catch (err) {
       if (err instanceof MigrationAborted) {
-        console.error(`[DB][migrate] aborted: ${err.message} | legacy JSON kept | backup: ${backupDir}`);
+        logger.error("DB Migrate", `Migration aborted: ${err.message}`, { backupDir });
         return;
       }
       throw err;
@@ -259,7 +260,7 @@ export async function runMigrationOnce(adapter) {
 
     try { fs.writeFileSync(MIGRATED_MARKER, new Date().toISOString()); } catch {}
     pruneOldBackups();
-    console.log(`[DB][migrate] JSON → SQLite in ${Date.now() - t0}ms | legacy JSON kept at DATA_DIR | backup: ${backupDir}`);
+    logger.info("DB Migrate", `JSON → SQLite completed`, { durationMs: Date.now() - t0, backupDir });
     return;
   }
 
@@ -276,7 +277,7 @@ export async function runMigrationOnce(adapter) {
     try { backupFile(DATA_FILE, backupDir); } catch {}
     setMetaSync(adapter, "appVersion", newVer);
     pruneOldBackups();
-    console.log(`[DB][migrate] App ${oldVer} → ${newVer} | schema ${migInfo.from} → ${migInfo.to} | backup: ${backupDir}`);
+    logger.info("DB Migrate", `App version upgraded`, { from: oldVer, to: newVer, schemaFrom: migInfo.from, schemaTo: migInfo.to, backupDir });
   } else if (migInfo.applied > 0) {
     // Schema upgrade without app version bump — still backup
     const backupDir = makeBackupDir(`schema-${migInfo.from}-to-${migInfo.to}`);
