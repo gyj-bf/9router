@@ -5,7 +5,13 @@ import { proxyAwareFetch } from "../../../open-sse/utils/proxyFetch.js";
 
 export const QODER_API_JOB_TOKEN_URL = "https://center.qoder.sh/algo/api/v3/user/jobToken?Encode=1";
 
-const DEFAULT_REFRESH_MARGIN_MS = 30_000;
+// Refresh margin: If the session expires within this window (5 minutes),
+// treat it as already expired and re-exchange the PAT proactively.
+// This prevents mid-request token expiry when the upstream is slow or
+// the request takes a long time to process (e.g., large payloads, reasoning).
+// Previously 30s which was too tight — a slow network or brief outage
+// during the last 30s would cause a failed request instead of a proactive refresh.
+const DEFAULT_REFRESH_MARGIN_MS = 5 * 60 * 1000;
 const DEFAULT_SESSION_TTL_MS = 60 * 60 * 1000;
 const QODER_APPCODE = "cosy";
 const QODER_SIGNATURE_SECRET = "d2FyLCB3YXIgbmV2ZXIgY2hhbmdlcw==";
@@ -116,6 +122,7 @@ export async function exchangeQoderApiToken(token, options = {}, proxyOptions = 
     machineId: machine.machineId,
     machineToken: machine.machineToken,
     machineType: machine.machineType,
+    exchangedAt: Date.now(),
   };
 }
 

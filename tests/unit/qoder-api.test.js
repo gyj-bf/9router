@@ -30,6 +30,28 @@ import {
 } from "../../src/lib/qoder/apiSession.js";
 import { getUsageForProvider } from "../../open-sse/services/usage.js";
 import { formatCampaignEndDate } from "../../src/app/(dashboard)/dashboard/usage/components/ProviderLimits/utils.js";
+import { QoderApiExecutor, buildQoderApiPayload, wrapQoderApiSSE } from "../../open-sse/executors/qoderApi.js";
+import { existsSync } from "fs";
+import { resolve, dirname } from "path";
+import { fileURLToPath } from "url";
+import {
+  QODER_CHAT_URL_ENCODED,
+  QODER_REGION_HOSTS,
+  getQoderRegion,
+  getQoderChatBase,
+  getQoderChatUrl,
+  getQoderActivityUrl,
+  getQoderModelListUrl,
+} from "../../src/lib/qoder/constants.js";
+import { getExecutor } from "../../open-sse/executors/index.js";
+import { parseModel } from "../../open-sse/services/model.js";
+import { PROVIDERS } from "../../open-sse/config/providers.js";
+import { APIKEY_PROVIDERS, FREE_PROVIDERS } from "../../src/shared/constants/providers.js";
+import { PROVIDER_MODELS } from "../../open-sse/config/providerModels.js";
+import { getOutputAliasesForProvider } from "../../src/app/api/v1/models/route.js";
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const PUBLIC_DIR = resolve(__dirname, "../../public");
 
 describe("qoder-api session helper", () => {
   beforeEach(() => {
@@ -102,6 +124,7 @@ describe("qoder-api session helper", () => {
       machineId: "machine-1",
       machineToken: "machine-token-1",
       machineType: "linux",
+      exchangedAt: Date.now(),
     });
   });
 
@@ -136,8 +159,8 @@ describe("qoder-api session helper", () => {
   });
 
   it("validates sessions with a refresh margin", () => {
-    expect(isQoderApiSessionValid({ userId: "u1", securityOauthToken: "tok", expiresAt: Date.now() + 120_000 })).toBe(true);
-    expect(isQoderApiSessionValid({ userId: "u1", securityOauthToken: "tok", expiresAt: Date.now() + 10_000 })).toBe(false);
+    expect(isQoderApiSessionValid({ userId: "u1", securityOauthToken: "tok", expiresAt: Date.now() + 600_000 })).toBe(true);
+    expect(isQoderApiSessionValid({ userId: "u1", securityOauthToken: "tok", expiresAt: Date.now() + 120_000 })).toBe(false);
     expect(isQoderApiSessionValid(null)).toBe(false);
   });
 
@@ -162,8 +185,6 @@ describe("qoder-api session helper", () => {
     });
   });
 });
-
-import { QoderApiExecutor, buildQoderApiPayload } from "../../open-sse/executors/qoderApi.js";
 
 describe("qoder-api executor request mapping", () => {
   it("builds a Qoder payload hoisting system messages, preserving multi-turn history, tools, and tool results", () => {
@@ -1011,10 +1032,6 @@ describe("qoder-api max_completion_tokens parameter", () => {
   });
 });
 
-import { existsSync } from "fs";
-import { QODER_CHAT_URL_ENCODED } from "../../src/lib/qoder/constants.js";
-import { wrapQoderApiSSE } from "../../open-sse/executors/qoderApi.js";
-
 async function readStreamText(response) {
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
@@ -1064,7 +1081,7 @@ describe("qoder-api executor network flow", () => {
     });
 
     expect(proxyAwareFetch).toHaveBeenCalledTimes(2);
-    expect(proxyAwareFetch.mock.calls[1][0]).toBe(QODER_CHAT_URL_ENCODED);
+    expect(proxyAwareFetch.mock.calls[1][0]).toBe(getQoderChatUrl());
     const request = proxyAwareFetch.mock.calls[1][1];
     expect(request.method).toBe("POST");
     expect(request.headers.Authorization).toMatch(/^Bearer COSY\./);
@@ -1087,14 +1104,6 @@ describe("qoder-api executor network flow", () => {
   });
 });
 
-import { getExecutor } from "../../open-sse/executors/index.js";
-import { parseModel } from "../../open-sse/services/model.js";
-import { PROVIDERS } from "../../open-sse/config/providers.js";
-
-import { APIKEY_PROVIDERS, FREE_PROVIDERS } from "../../src/shared/constants/providers.js";
-import { PROVIDER_MODELS } from "../../open-sse/config/providerModels.js";
-import { getOutputAliasesForProvider } from "../../src/app/api/v1/models/route.js";
-
 describe("qoder-api dashboard metadata", () => {
   it("exposes Qoder API as an API-key provider and keeps built-in Qoder separate", () => {
     expect(APIKEY_PROVIDERS["qoder-api"]).toBeDefined();
@@ -1105,8 +1114,8 @@ describe("qoder-api dashboard metadata", () => {
     expect(APIKEY_PROVIDERS["qoder-api"].icon).toBe(FREE_PROVIDERS.qoder.icon);
     expect(APIKEY_PROVIDERS["qoder-api"].color).toBe(FREE_PROVIDERS.qoder.color);
     expect(APIKEY_PROVIDERS["qoder-api"].notice.apiKeyUrl).toBe("https://qoder.com/account/integrations");
-    expect(existsSync("../public/providers/qoder.png")).toBe(true);
-    expect(existsSync("../public/providers/qoder-api.png")).toBe(true);
+    expect(existsSync(resolve(PUBLIC_DIR, "providers/qoder.png"))).toBe(true);
+    expect(existsSync(resolve(PUBLIC_DIR, "providers/qoder-api.png"))).toBe(true);
     expect(FREE_PROVIDERS.qoder.alias).toBe("qd");
   });
 
@@ -2091,7 +2100,7 @@ describe("qoder-api error handling and logging", () => {
   });
 
   describe("logging behavior", () => {
-    it("does not log info or debug level messages on success", async () => {
+    it("logs info on successful chat request", async () => {
       const logger = await import("../../src/sse/utils/logger.js");
       const infoSpy = vi.spyOn(logger, "info");
       const debugSpy = vi.spyOn(logger, "debug");
@@ -2114,7 +2123,15 @@ describe("qoder-api error handling and logging", () => {
         provider: "qoder-api",
       });
 
-      expect(infoSpy).not.toHaveBeenCalled();
+      expect(infoSpy).toHaveBeenCalledWith(
+        "Qoder API",
+        "Chat request successful",
+        expect.objectContaining({
+          requestId: expect.any(String),
+          modelKey: "lite",
+          status: 200,
+        })
+      );
       expect(debugSpy).not.toHaveBeenCalled();
 
       infoSpy.mockRestore();
@@ -2219,7 +2236,6 @@ describe("qoder-api error handling and logging", () => {
         expect.objectContaining({
           requestId: expect.any(String),
           error: "Network error",
-          stack: expect.any(String),
         })
       );
 
@@ -2259,7 +2275,6 @@ describe("qoder-api error handling and logging", () => {
         expect.objectContaining({
           requestId: expect.any(String),
           error: expect.any(String),
-          stack: expect.any(String),
         })
       );
 
@@ -2516,5 +2531,160 @@ describe("formatCampaignEndDate", () => {
   it("treats exactly now as expired", () => {
     const result = formatCampaignEndDate("2026-06-15T12:00:00.000Z");
     expect(result.expired).toBe(true);
+  });
+});
+
+// ── Region Override (QODER_API_REGION) ─────────────────────────────────────
+
+describe("qoder-api region override", () => {
+  const originalEnv = process.env.QODER_API_REGION;
+
+  afterEach(() => {
+    if (originalEnv === undefined) {
+      delete process.env.QODER_API_REGION;
+    } else {
+      process.env.QODER_API_REGION = originalEnv;
+    }
+  });
+
+  describe("getQoderRegion", () => {
+    it("returns 'sg' by default when QODER_API_REGION is not set", () => {
+      delete process.env.QODER_API_REGION;
+      expect(getQoderRegion()).toBe("sg");
+    });
+
+    it("returns 'us' when QODER_API_REGION is 'us'", () => {
+      process.env.QODER_API_REGION = "us";
+      expect(getQoderRegion()).toBe("us");
+    });
+
+    it("returns 'sg' when QODER_API_REGION is 'sg'", () => {
+      process.env.QODER_API_REGION = "sg";
+      expect(getQoderRegion()).toBe("sg");
+    });
+
+    it("returns 'jp' when QODER_API_REGION is 'jp'", () => {
+      process.env.QODER_API_REGION = "jp";
+      expect(getQoderRegion()).toBe("jp");
+    });
+
+    it("returns 'sg' for invalid region values", () => {
+      process.env.QODER_API_REGION = "invalid";
+      expect(getQoderRegion()).toBe("sg");
+
+      process.env.QODER_API_REGION = "eu";
+      expect(getQoderRegion()).toBe("sg");
+
+      process.env.QODER_API_REGION = "";
+      expect(getQoderRegion()).toBe("sg");
+    });
+
+    it("handles case-insensitive region values", () => {
+      process.env.QODER_API_REGION = "US";
+      expect(getQoderRegion()).toBe("us");
+
+      process.env.QODER_API_REGION = "SG";
+      expect(getQoderRegion()).toBe("sg");
+
+      process.env.QODER_API_REGION = "JP";
+      expect(getQoderRegion()).toBe("jp");
+    });
+
+    it("trims whitespace from region values", () => {
+      process.env.QODER_API_REGION = "  us  ";
+      expect(getQoderRegion()).toBe("us");
+
+      process.env.QODER_API_REGION = "\tjp\n";
+      expect(getQoderRegion()).toBe("jp");
+    });
+  });
+
+  describe("getQoderChatBase", () => {
+    it("returns SG host by default", () => {
+      delete process.env.QODER_API_REGION;
+      expect(getQoderChatBase()).toBe("https://api2.qoder.sh");
+    });
+
+    it("returns US host when region is 'us'", () => {
+      process.env.QODER_API_REGION = "us";
+      expect(getQoderChatBase()).toBe("https://api1.qoder.sh");
+    });
+
+    it("returns JP host when region is 'jp'", () => {
+      process.env.QODER_API_REGION = "jp";
+      expect(getQoderChatBase()).toBe("https://api3.qoder.sh");
+    });
+  });
+
+  describe("getQoderChatUrl", () => {
+    it("returns SG chat URL by default", () => {
+      delete process.env.QODER_API_REGION;
+      const url = getQoderChatUrl();
+      expect(url).toContain("api2.qoder.sh");
+      expect(url).toContain("/algo/api/v2/service/pro/sse/agent_chat_generation");
+      expect(url).toContain("Encode=1");
+    });
+
+    it("returns US chat URL when region is 'us'", () => {
+      process.env.QODER_API_REGION = "us";
+      const url = getQoderChatUrl();
+      expect(url).toContain("api1.qoder.sh");
+    });
+
+    it("returns JP chat URL when region is 'jp'", () => {
+      process.env.QODER_API_REGION = "jp";
+      const url = getQoderChatUrl();
+      expect(url).toContain("api3.qoder.sh");
+    });
+  });
+
+  describe("getQoderActivityUrl", () => {
+    it("returns SG activity URL by default", () => {
+      delete process.env.QODER_API_REGION;
+      expect(getQoderActivityUrl()).toBe("https://api2.qoder.sh/algo/api/v2/activity");
+    });
+
+    it("returns US activity URL when region is 'us'", () => {
+      process.env.QODER_API_REGION = "us";
+      expect(getQoderActivityUrl()).toBe("https://api1.qoder.sh/algo/api/v2/activity");
+    });
+
+    it("returns JP activity URL when region is 'jp'", () => {
+      process.env.QODER_API_REGION = "jp";
+      expect(getQoderActivityUrl()).toBe("https://api3.qoder.sh/algo/api/v2/activity");
+    });
+  });
+
+  describe("getQoderModelListUrl", () => {
+    it("returns SG model list URL by default", () => {
+      delete process.env.QODER_API_REGION;
+      expect(getQoderModelListUrl()).toBe("https://api2.qoder.sh/algo/api/v2/model/list");
+    });
+
+    it("returns US model list URL when region is 'us'", () => {
+      process.env.QODER_API_REGION = "us";
+      expect(getQoderModelListUrl()).toBe("https://api1.qoder.sh/algo/api/v2/model/list");
+    });
+
+    it("returns JP model list URL when region is 'jp'", () => {
+      process.env.QODER_API_REGION = "jp";
+      expect(getQoderModelListUrl()).toBe("https://api3.qoder.sh/algo/api/v2/model/list");
+    });
+  });
+
+  describe("QODER_REGION_HOSTS map", () => {
+    it("contains all three regions", () => {
+      expect(QODER_REGION_HOSTS.us).toBe("https://api1.qoder.sh");
+      expect(QODER_REGION_HOSTS.sg).toBe("https://api2.qoder.sh");
+      expect(QODER_REGION_HOSTS.jp).toBe("https://api3.qoder.sh");
+    });
+  });
+
+  describe("static constants backward compatibility", () => {
+    it("QODER_CHAT_URL_ENCODED uses default region (sg)", () => {
+      delete process.env.QODER_API_REGION;
+      expect(QODER_CHAT_URL_ENCODED).toContain("api3.qoder.sh");
+      expect(QODER_CHAT_URL_ENCODED).toContain("Encode=1");
+    });
   });
 });

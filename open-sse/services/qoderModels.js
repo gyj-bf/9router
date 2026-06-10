@@ -17,7 +17,7 @@ import { createHash } from "crypto";
 import { proxyAwareFetch } from "../utils/proxyFetch.js";
 import { buildCosyHeaders } from "@/lib/qoder/cosy.js";
 import {
-  QODER_MODEL_LIST_URL,
+  getQoderModelListUrl,
 } from "@/lib/qoder/constants.js";
 
 const FETCH_TIMEOUT_MS = 15_000;
@@ -68,10 +68,11 @@ async function fetchQoderCatalogRaw(credentials, signal, proxyOptions = null) {
   const creds = cosyCredsFromConnection(credentials);
   if (!creds.userId || !creds.authToken) return null;
 
+  const modelListUrl = getQoderModelListUrl();
   const headers = {
     Accept: "application/json",
     "Accept-Encoding": "identity",
-    ...buildCosyHeaders(Buffer.alloc(0), QODER_MODEL_LIST_URL, creds),
+    ...buildCosyHeaders(Buffer.alloc(0), modelListUrl, creds),
   };
 
   const controller = new AbortController();
@@ -92,7 +93,7 @@ async function fetchQoderCatalogRaw(credentials, signal, proxyOptions = null) {
       }
     }
     response = await proxyAwareFetch(
-      QODER_MODEL_LIST_URL,
+      modelListUrl,
       {
         method: "GET",
         headers,

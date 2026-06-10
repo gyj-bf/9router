@@ -8,7 +8,7 @@ import { exchangeQoderApiToken, isQoderApiSessionValid } from "../../src/lib/qod
 import { buildCosyHeaders } from "../../src/lib/qoder/cosy.js";
 import * as logger from "../../src/sse/utils/logger.js";
 import {
-  QODER_ACTIVITY_URL,
+  getQoderActivityUrl,
   QODER_COSY_VERSION,
   QODER_MACHINE_OS_OPTIONS,
   QODER_QUOTA_USAGE_URL,
@@ -1284,10 +1284,11 @@ async function getQoderApiUsage(apiKey, providerSpecificData, proxyOptions = nul
 }
 
 async function fetchQoderActivity(cosyCreds, proxyOptions) {
-  const cosyHeaders = buildCosyHeaders("", QODER_ACTIVITY_URL, cosyCreds);
+  const activityUrl = getQoderActivityUrl();
+  const cosyHeaders = buildCosyHeaders("", activityUrl, cosyCreds);
 
   const response = await proxyAwareFetch(
-    QODER_ACTIVITY_URL,
+    activityUrl,
     {
       method: "GET",
       headers: {

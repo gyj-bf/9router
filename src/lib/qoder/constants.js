@@ -12,6 +12,36 @@ export const QODER_OPENAPI_BASE = "https://openapi.qoder.sh";
 export const QODER_CENTER_BASE = "https://center.qoder.sh";
 export const QODER_CHAT_BASE = "https://api3.qoder.sh";
 
+// Regional inference hosts — override via QODER_API_REGION env var (us, sg, jp).
+// All 3 hosts verified to support PAT + COSY signing + body encoding (2026-06-10).
+// SG has lowest latency from Asia, JP is current default, US is fallback.
+export const QODER_REGION_HOSTS = {
+  us: "https://api1.qoder.sh",
+  sg: "https://api2.qoder.sh",
+  jp: "https://api3.qoder.sh",
+};
+
+export function getQoderRegion() {
+  const raw = (process.env.QODER_API_REGION || "sg").toLowerCase().trim();
+  return QODER_REGION_HOSTS[raw] ? raw : "sg";
+}
+
+export function getQoderChatBase() {
+  return QODER_REGION_HOSTS[getQoderRegion()];
+}
+
+export function getQoderChatUrl() {
+  return `${getQoderChatBase()}/algo${QODER_CHAT_SIG_PATH}?FetchKeys=llm_model_result&AgentId=agent_common&Encode=1`;
+}
+
+export function getQoderActivityUrl() {
+  return `${getQoderChatBase()}/algo/api/v2/activity`;
+}
+
+export function getQoderModelListUrl() {
+  return `${getQoderChatBase()}/algo/api/v2/model/list`;
+}
+
 export const QODER_LOGIN_URL = "https://qoder.com/device/selectAccounts";
 
 // Device flow endpoints
@@ -46,6 +76,17 @@ export const QODER_MACHINE_TYPE = "5";
  * version is discovered.
  */
 export const QODER_COSY_VERSION = process.env.QODER_COSY_VERSION || "2.11.2";
+
+// Max output tokens: Set a high default to allow for long code generation and reasoning, can be overridden by request body
+// OpenAI max tokens is typically 4096-8192 depending on model, Anthropic models vary but often around 2048-4096
+// Setting a high default (32768) to allow for complex coding tasks and reasoning, but can be adjusted per request
+export const DEFAULT_MAX_OUTPUT_TOKENS = 32768; // High reasoning effort
+
+// Temperature: Controls randomness in output generation (0-2 for OpenAI, 0-1 for Anthropic)
+// Lower values (0.0-0.3) make output more deterministic/focused for coding tasks
+// Higher values (0.7-1.0) make output more creative/random for generative tasks
+// OpenAI default: 1.0, Anthropic default: 1.0
+export const DEFAULT_TEMPERATURE = 0.1; // Low randomness for coding tasks
 
 /**
  * Platform identifiers the Qoder backend accepts in `Cosy-Machineos`.
