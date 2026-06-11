@@ -5,7 +5,7 @@ import {
   QODER_MODEL_MAP,
   QODER_MODEL_CONFIG_MAP,
   QODER_MACHINE_OS_OPTIONS,
-  QODER_COSY_VERSION,
+  getQoderCosyVersion,
   DEFAULT_MAX_OUTPUT_TOKENS,
   DEFAULT_TEMPERATURE,
 } from "../../src/lib/qoder/constants.js";
@@ -525,7 +525,7 @@ export class QoderApiExecutor {
         machineId: session.machineId || "",
         machineToken: session.machineToken || "",
         machineType: session.machineType || "",
-        cosyVersion: QODER_COSY_VERSION,
+        cosyVersion: getQoderCosyVersion(),
         machineOs: QODER_MACHINE_OS_OPTIONS[Math.floor(Math.random() * QODER_MACHINE_OS_OPTIONS.length)],
       });
     } catch (error) {

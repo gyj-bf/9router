@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getSettings, updateSettings } from "@/lib/localDb";
 import { applyOutboundProxyEnv } from "@/lib/network/outboundProxy";
+import { applyQoderSettingsToEnv } from "@/lib/qoder/qoderEnv";
 import { resetComboRotation } from "open-sse/services/combo.js";
 import bcrypt from "bcryptjs";
 
@@ -79,6 +80,15 @@ export async function PATCH(request) {
       Object.prototype.hasOwnProperty.call(body, "outboundNoProxy")
     ) {
       applyOutboundProxyEnv(settings);
+    }
+
+    if (
+      Object.prototype.hasOwnProperty.call(body, "qoderApiRegion") ||
+      Object.prototype.hasOwnProperty.call(body, "qoderCosyVersion") ||
+      Object.prototype.hasOwnProperty.call(body, "mitmBypassQoder") ||
+      Object.prototype.hasOwnProperty.call(body, "mitmBypassExtraHosts")
+    ) {
+      applyQoderSettingsToEnv(settings);
     }
 
     // Invalidate combo rotation state when strategy settings change

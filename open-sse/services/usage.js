@@ -9,7 +9,7 @@ import { buildCosyHeaders } from "../../src/lib/qoder/cosy.js";
 import * as logger from "../../src/sse/utils/logger.js";
 import {
   getQoderActivityUrl,
-  QODER_COSY_VERSION,
+  getQoderCosyVersion,
   QODER_MACHINE_OS_OPTIONS,
   QODER_QUOTA_USAGE_URL,
 } from "../../src/lib/qoder/constants.js";
@@ -1254,7 +1254,7 @@ async function getQoderApiUsage(apiKey, providerSpecificData, proxyOptions = nul
     machineId: session.machineId || "",
     machineToken: session.machineToken || "",
     machineType: session.machineType || "",
-    cosyVersion: QODER_COSY_VERSION,
+    cosyVersion: getQoderCosyVersion(),
     machineOs,
   };
 

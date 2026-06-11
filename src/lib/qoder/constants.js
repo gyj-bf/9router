@@ -12,6 +12,13 @@ export const QODER_OPENAPI_BASE = "https://openapi.qoder.sh";
 export const QODER_CENTER_BASE = "https://center.qoder.sh";
 export const QODER_CHAT_BASE = "https://api3.qoder.sh";
 
+export const QODER_DEFAULTS = Object.freeze({
+  region: "sg",
+  cosyVersion: "2.11.2",
+  mitmBypassQoder: false,
+  mitmBypassExtraHosts: "",
+});
+
 // Regional inference hosts — override via QODER_API_REGION env var (us, sg, jp).
 // All 3 hosts verified to support PAT + COSY signing + body encoding (2026-06-10).
 // SG has lowest latency from Asia, JP is current default, US is fallback.
@@ -22,8 +29,8 @@ export const QODER_REGION_HOSTS = {
 };
 
 export function getQoderRegion() {
-  const raw = (process.env.QODER_API_REGION || "sg").toLowerCase().trim();
-  return QODER_REGION_HOSTS[raw] ? raw : "sg";
+  const raw = (process.env.QODER_API_REGION || QODER_DEFAULTS.region).toLowerCase().trim();
+  return QODER_REGION_HOSTS[raw] ? raw : QODER_DEFAULTS.region;
 }
 
 export function getQoderChatBase() {
@@ -75,7 +82,9 @@ export const QODER_MACHINE_TYPE = "5";
  * protocol. Override via `QODER_COSY_VERSION` env var if a newer
  * version is discovered.
  */
-export const QODER_COSY_VERSION = process.env.QODER_COSY_VERSION || "2.11.2";
+export function getQoderCosyVersion() {
+  return process.env.QODER_COSY_VERSION || QODER_DEFAULTS.cosyVersion;
+}
 
 // Max output tokens: Set a high default to allow for long code generation and reasoning, can be overridden by request body
 // OpenAI max tokens is typically 4096-8192 depending on model, Anthropic models vary but often around 2048-4096

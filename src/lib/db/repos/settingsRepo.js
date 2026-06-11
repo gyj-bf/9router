@@ -1,5 +1,6 @@
 import { getAdapter } from "../driver.js";
 import { parseJson, stringifyJson } from "../helpers/jsonCol.js";
+import { QODER_DEFAULTS } from "@/lib/qoder/constants.js";
 
 const DEFAULT_MITM_ROUTER_BASE = "http://localhost:20128";
 
@@ -36,6 +37,10 @@ const DEFAULT_SETTINGS = {
   rtkEnabled: true,
   cavemanEnabled: false,
   cavemanLevel: "full",
+  qoderApiRegion: QODER_DEFAULTS.region,
+  qoderCosyVersion: QODER_DEFAULTS.cosyVersion,
+  mitmBypassQoder: QODER_DEFAULTS.mitmBypassQoder,
+  mitmBypassExtraHosts: QODER_DEFAULTS.mitmBypassExtraHosts,
 };
 
 async function readRaw() {

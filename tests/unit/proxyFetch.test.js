@@ -39,12 +39,32 @@ describe("proxyFetch MITM bypass", () => {
       expect(shouldBypassMitmDns("https://any.qoder.com/test")).toBe(true);
     });
 
+    it("bypasses *.qoder.com.cn when MITM_BYPASS_QODER=true", async () => {
+      process.env.MITM_BYPASS_QODER = "true";
+      const { shouldBypassMitmDns } = await import("../../open-sse/utils/proxyFetch.js");
+      
+      expect(shouldBypassMitmDns("https://api.qoder.com.cn/test")).toBe(true);
+      expect(shouldBypassMitmDns("https://center.qoder.com.cn/test")).toBe(true);
+      expect(shouldBypassMitmDns("https://any.qoder.com.cn/test")).toBe(true);
+    });
+
+    it("bypasses *.qoder.ai when MITM_BYPASS_QODER=true", async () => {
+      process.env.MITM_BYPASS_QODER = "true";
+      const { shouldBypassMitmDns } = await import("../../open-sse/utils/proxyFetch.js");
+      
+      expect(shouldBypassMitmDns("https://api.qoder.ai/test")).toBe(true);
+      expect(shouldBypassMitmDns("https://chat.qoder.ai/test")).toBe(true);
+      expect(shouldBypassMitmDns("https://any.qoder.ai/test")).toBe(true);
+    });
+
     it("does not bypass qoder hosts when MITM_BYPASS_QODER=false", async () => {
       process.env.MITM_BYPASS_QODER = "false";
       const { shouldBypassMitmDns } = await import("../../open-sse/utils/proxyFetch.js");
       
       expect(shouldBypassMitmDns("https://center.qoder.sh/test")).toBe(false);
       expect(shouldBypassMitmDns("https://api.qoder.com/test")).toBe(false);
+      expect(shouldBypassMitmDns("https://api.qoder.com.cn/test")).toBe(false);
+      expect(shouldBypassMitmDns("https://api.qoder.ai/test")).toBe(false);
     });
 
     it("does not bypass qoder hosts when MITM_BYPASS_QODER is unset", async () => {
@@ -53,6 +73,8 @@ describe("proxyFetch MITM bypass", () => {
       
       expect(shouldBypassMitmDns("https://center.qoder.sh/test")).toBe(false);
       expect(shouldBypassMitmDns("https://api.qoder.com/test")).toBe(false);
+      expect(shouldBypassMitmDns("https://api.qoder.com.cn/test")).toBe(false);
+      expect(shouldBypassMitmDns("https://api.qoder.ai/test")).toBe(false);
     });
 
     it("bypasses MITM_BYPASS_EXTRA_HOSTS", async () => {

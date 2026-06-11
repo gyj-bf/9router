@@ -1,25 +1,28 @@
 import { getSettings } from "@/lib/localDb";
 import { applyOutboundProxyEnv } from "@/lib/network/outboundProxy";
+import * as logger from "@/sse/utils/logger";
 
-let initialized = false;
+const LOG_TAG = "Outbound Proxy";
 
-export async function ensureOutboundProxyInitialized() {
-  if (initialized) return true;
+let initPromise = null;
 
-  try {
-    const settings = await getSettings();
-    applyOutboundProxyEnv(settings);
-    initialized = true;
-  } catch (error) {
-    console.error("[ServerInit] Error initializing outbound proxy:", error);
-  }
-
-  return initialized;
+async function doInit() {
+  const settings = await getSettings();
+  applyOutboundProxyEnv(settings);
 }
 
-// Defer init so HTTP server accepts connections first
+export function ensureOutboundProxyInitialized() {
+  if (!initPromise) {
+    initPromise = doInit().catch((error) => {
+      initPromise = null;
+      logger.error(LOG_TAG, "Error initializing outbound proxy", { error: error.message });
+    });
+  }
+  return initPromise;
+}
+
 setImmediate(() => {
-  ensureOutboundProxyInitialized().catch(console.log);
+  ensureOutboundProxyInitialized();
 });
 
 export default ensureOutboundProxyInitialized;

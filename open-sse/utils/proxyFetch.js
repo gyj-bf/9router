@@ -107,11 +107,25 @@ const MITM_BYPASS_HOSTS = [
   "codewhisperer.us-east-1.amazonaws.com",
   "api2.cursor.sh",
 ];
-const QODER_HOSTS = ["qoder.sh", "qoder.com"];
+const QODER_HOSTS = ["qoder.sh", "qoder.com", "qoder.com.cn", "qoder.ai"];
 const GOOGLE_DNS_SERVERS = ["8.8.8.8", "8.8.4.4"];
 const HTTPS_PORT = 443;
 const HTTP_SUCCESS_MIN = 200;
 const HTTP_SUCCESS_MAX = 300;
+
+let mitmBypassCache = { qoderEnabled: false, extraHosts: [] };
+
+function parseHostList(str) {
+  if (!str || typeof str !== "string") return [];
+  return str.split(",").map(h => h.trim().toLowerCase()).filter(Boolean);
+}
+
+export function updateMitmBypassCache({ mitmBypassQoder, mitmBypassExtraHosts } = {}) {
+  mitmBypassCache = {
+    qoderEnabled: Boolean(mitmBypassQoder),
+    extraHosts: parseHostList(mitmBypassExtraHosts),
+  };
+}
 
 function normalizeString(value) {
   if (value === undefined || value === null) return "";
@@ -161,14 +175,16 @@ function shouldBypassMitmDns(url) {
     if (MITM_BYPASS_HOSTS.some(matchesHost)) return true;
 
     const bypassQoder = normalizeString(process.env.MITM_BYPASS_QODER).toLowerCase();
-    if (bypassQoder === "true" || bypassQoder === "1") {
+    const qoderFromEnv = bypassQoder === "true" || bypassQoder === "1";
+    if (qoderFromEnv || mitmBypassCache.qoderEnabled) {
       if (QODER_HOSTS.some(matchesHost)) return true;
     }
 
-    const extra = normalizeString(process.env.MITM_BYPASS_EXTRA_HOSTS);
-    if (!extra) return false;
-    return extra.split(",").map(h => h.trim().toLowerCase()).filter(Boolean)
-      .some(matchesHost);
+    const extraEnv = normalizeString(process.env.MITM_BYPASS_EXTRA_HOSTS);
+    const allExtra = [...new Set([...parseHostList(extraEnv), ...mitmBypassCache.extraHosts])];
+    if (allExtra.some(matchesHost)) return true;
+
+    return false;
   } catch { return false; }
 }
 

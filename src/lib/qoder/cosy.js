@@ -18,7 +18,7 @@ import { v4 as uuidv4 } from "uuid";
 
 import {
   QODER_CLIENT_TYPE,
-  QODER_COSY_VERSION,
+  getQoderCosyVersion,
   QODER_DATA_POLICY,
   QODER_IDE_VERSION,
   QODER_LOGIN_VERSION,
@@ -136,7 +136,7 @@ export function buildCosyHeaders(body, requestUrl, creds) {
 
   const timestamp = String(Math.floor(Date.now() / 1000));
   const requestId = uuidv4();
-  const cosyVersion = creds.cosyVersion || QODER_COSY_VERSION;
+  const cosyVersion = creds.cosyVersion || getQoderCosyVersion();
   const machineOs = creds.machineOs || QODER_MACHINE_OS;
 
   const payloadJson = JSON.stringify({

@@ -5,6 +5,7 @@ import { Card, Button, Toggle, Input } from "@/shared/components";
 import { useTheme } from "@/shared/hooks/useTheme";
 import { cn } from "@/shared/utils/cn";
 import { APP_CONFIG } from "@/shared/constants/config";
+import { QODER_DEFAULTS } from "@/lib/qoder/constants";
 
 export default function ProfilePage() {
   const { theme, setTheme, isDark } = useTheme();
@@ -38,6 +39,14 @@ export default function ProfilePage() {
   const [proxyStatus, setProxyStatus] = useState({ type: "", message: "" });
   const [proxyLoading, setProxyLoading] = useState(false);
   const [proxyTestLoading, setProxyTestLoading] = useState(false);
+  const [qoderForm, setQoderForm] = useState({
+    qoderApiRegion: QODER_DEFAULTS.region,
+    qoderCosyVersion: QODER_DEFAULTS.cosyVersion,
+    mitmBypassQoder: QODER_DEFAULTS.mitmBypassQoder,
+    mitmBypassExtraHosts: QODER_DEFAULTS.mitmBypassExtraHosts,
+  });
+  const [qoderStatus, setQoderStatus] = useState({ type: "", message: "" });
+  const [qoderLoading, setQoderLoading] = useState(false);
 
   useEffect(() => {
     fetch("/api/settings")
@@ -58,6 +67,7 @@ export default function ProfilePage() {
           outboundProxyUrl: data?.outboundProxyUrl || "",
           outboundNoProxy: data?.outboundNoProxy || "",
         });
+        setQoderForm(syncQoderForm(data));
         setLoading(false);
       })
       .catch((err) => {
@@ -434,6 +444,46 @@ export default function ProfilePage() {
       }
     } catch (err) {
       console.error("Failed to update enableObservability:", err);
+    }
+  };
+
+  const syncQoderForm = (data) => ({
+    qoderApiRegion: data?.qoderApiRegion ?? QODER_DEFAULTS.region,
+    qoderCosyVersion: data?.qoderCosyVersion ?? QODER_DEFAULTS.cosyVersion,
+    mitmBypassQoder: data?.mitmBypassQoder === true,
+    mitmBypassExtraHosts: data?.mitmBypassExtraHosts ?? QODER_DEFAULTS.mitmBypassExtraHosts,
+  });
+
+  const saveQoderSettings = async () => {
+    setQoderLoading(true);
+    setQoderStatus({ type: "", message: "" });
+
+    try {
+      const payload = {
+        qoderApiRegion: qoderForm.qoderApiRegion,
+        qoderCosyVersion: qoderForm.qoderCosyVersion,
+        mitmBypassQoder: qoderForm.mitmBypassQoder,
+        mitmBypassExtraHosts: qoderForm.mitmBypassExtraHosts,
+      };
+
+      const res = await fetch("/api/settings", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+
+      const data = await res.json();
+      if (res.ok) {
+        setSettings((prev) => ({ ...prev, ...data }));
+        setQoderForm(syncQoderForm(data));
+        setQoderStatus({ type: "success", message: "Qoder API settings saved" });
+      } else {
+        setQoderStatus({ type: "error", message: data.error || "Failed to save Qoder settings" });
+      }
+    } catch (err) {
+      setQoderStatus({ type: "error", message: "An error occurred" });
+    } finally {
+      setQoderLoading(false);
     }
   };
 
@@ -1021,6 +1071,99 @@ export default function ProfilePage() {
               onChange={updateObservabilityEnabled}
               disabled={loading}
             />
+          </div>
+        </Card>
+
+        {/* Qoder API Provider */}
+        <Card>
+          <div className="flex items-center gap-3 mb-4">
+            <div className="p-1 rounded-lg bg-cyan-500/10 shrink-0">
+              <img src="/providers/qoder-api.png" alt="Qoder" className="size-7 rounded" />
+            </div>
+            <h3 className="text-base sm:text-lg font-semibold">Qoder API Provider</h3>
+          </div>
+          <div className="flex flex-col gap-4">
+            <div className="grid grid-cols-1 gap-4">
+              <div className="flex flex-col gap-2">
+                <label className="font-medium text-sm sm:text-base">Region</label>
+                <div className="grid grid-cols-3 gap-2">
+                  {[
+                    { value: "sg", flag: "\u{1F1F8}\u{1F1EC}", label: "Singapore" },
+                    { value: "jp", flag: "\u{1F1EF}\u{1F1F5}", label: "Japan" },
+                    { value: "us", flag: "\u{1F1FA}\u{1F1F8}", label: "US East" },
+                  ].map((option) => {
+                    const active = qoderForm.qoderApiRegion === option.value;
+                    return (
+                      <button
+                        key={option.value}
+                        type="button"
+                        onClick={() => setQoderForm((prev) => ({ ...prev, qoderApiRegion: option.value }))}
+                        className={cn(
+                          "flex flex-col items-center justify-start gap-1 px-2 py-3 rounded-lg text-xs font-medium transition-colors w-full",
+                          active
+                            ? "bg-primary/15 text-primary ring-2 ring-primary"
+                            : "text-text-main hover:bg-black/5 dark:hover:bg-white/5"
+                        )}
+                        disabled={qoderLoading}
+                      >
+                        <span className="text-2xl">{option.flag}</span>
+                        <span className="text-center leading-tight">{option.label}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div className="flex flex-col gap-2">
+                <label className="font-medium text-sm sm:text-base">COSY Version</label>
+                <Input
+                  placeholder="2.11.2"
+                  value={qoderForm.qoderCosyVersion}
+                  onChange={(e) => setQoderForm((prev) => ({ ...prev, qoderCosyVersion: e.target.value }))}
+                  disabled={qoderLoading}
+                />
+                <p className="text-xs sm:text-sm text-text-muted">Protocol version for COSY header signing.</p>
+              </div>
+            </div>
+
+            <div className="flex items-start sm:items-center justify-between gap-4 pt-4 border-t border-border/50">
+              <div className="flex-1 min-w-0">
+                <p className="font-medium text-sm sm:text-base">MITM DNS Bypass</p>
+                <p className="text-xs sm:text-sm text-text-muted">
+                  Bypass enterprise firewall DNS spoofing for Qoder hosts via Google DNS (8.8.8.8)
+                </p>
+              </div>
+              <Toggle
+                checked={qoderForm.mitmBypassQoder}
+                onChange={() => setQoderForm((prev) => ({ ...prev, mitmBypassQoder: !prev.mitmBypassQoder }))}
+                disabled={qoderLoading}
+              />
+            </div>
+
+            {qoderForm.mitmBypassQoder && (
+              <div className="flex flex-col gap-2 pt-2 border-t border-border/50">
+                <label className="font-medium text-sm sm:text-base">Extra Bypass Hosts</label>
+                <Input
+                  placeholder="custom.api.com,another.host.com"
+                  value={qoderForm.mitmBypassExtraHosts}
+                  onChange={(e) => setQoderForm((prev) => ({ ...prev, mitmBypassExtraHosts: e.target.value }))}
+                  disabled={qoderLoading}
+                />
+                <p className="text-xs sm:text-sm text-text-muted">Comma-separated hostnames to also bypass DNS for.</p>
+              </div>
+            )}
+
+            <div className="flex flex-col sm:flex-row gap-2 pt-2 border-t border-border/50">
+              <Button type="button" variant="primary" loading={qoderLoading} onClick={saveQoderSettings} className="w-full sm:w-auto">
+                Save settings
+              </Button>
+            </div>
+
+            {qoderStatus.message && (
+              <p className={`text-xs sm:text-sm ${qoderStatus.type === "error" ? "text-red-500" : "text-green-500"}`}>
+                {qoderStatus.message}
+              </p>
+            )}
           </div>
         </Card>
 

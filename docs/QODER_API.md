@@ -105,7 +105,7 @@ curl 'https://center.qoder.sh/algo/api/v3/user/jobToken?Encode=1' \
 - `model_config.is_vl` auto-set to `true` when images present
 - `temperature` default: 0.1 (low randomness for coding)
 - `max_tokens` default: 32768 (high for complex tasks)
-- `cosy-version: 2.11.2` (override via `QODER_COSY_VERSION` env var)
+- `cosy-version: 2.11.2` (configurable via Dashboard → Profile → Qoder API Provider)
 - `cosy-machineos`: random from 6 platforms (anti-fingerprinting)
 
 **Example curl:**
@@ -408,16 +408,15 @@ Some enterprise firewalls (FortiGate, etc.) perform DNS spoofing to intercept an
 
 ### Solution: MITM DNS Bypass
 
-Enable DNS bypass to resolve Qoder hosts via Google DNS (8.8.8.8) instead of corporate DNS:
+Enable DNS bypass to resolve Qoder hosts via Google DNS (8.8.8.8) instead of corporate DNS.
 
-```bash
-# .env
-MITM_BYPASS_QODER=true
-```
+**Configuration:** Dashboard → Profile → Qoder API Provider → MITM DNS Bypass (toggle)
 
 This bypasses DNS-level blocking for all Qoder domains:
 - `*.qoder.sh` (center.qoder.sh, api3.qoder.sh, etc.)
 - `*.qoder.com` (all qoder.com subdomains)
+- `*.qoder.com.cn` (China region subdomains)
+- `*.qoder.ai` (AI platform subdomains)
 - Any future Qoder endpoints
 
 ### How It Works
@@ -491,10 +490,12 @@ This bypasses DNS-level blocking for all Qoder domains:
 
 ### Configuration Options
 
-| Variable | Description | Example |
-|----------|-------------|---------|
-| `MITM_BYPASS_QODER` | Enable DNS bypass for all `*.qoder.sh` and `*.qoder.com` hosts | `true` |
-| `MITM_BYPASS_EXTRA_HOSTS` | Comma-separated list of additional hosts to bypass | `custom.api.com,another.host.com` |
+All settings are configured via **Dashboard → Profile → Qoder API Provider**.
+
+| Setting | Description | Default |
+|---------|-------------|---------|
+| MITM DNS Bypass | Enable DNS bypass for all `*.qoder.sh` and `*.qoder.com` hosts | `false` |
+| Extra Bypass Hosts | Comma-separated list of additional hosts to bypass | _(empty)_ |
 
 ### When to Use
 
@@ -759,7 +760,7 @@ Successful requests logged as:
 
 ## 10. Regional Routing
 
-Qoder API has multiple regional inference endpoints. Override via `QODER_API_REGION` environment variable.
+Qoder API has multiple regional inference endpoints. Configure via **Dashboard → Profile → Qoder API Provider → API Region**.
 
 ### Available Regions
 
@@ -777,10 +778,7 @@ All three hosts verified to support:
 
 ### Configuration
 
-```bash
-# .env
-QODER_API_REGION=sg  # Options: us, sg, jp (default: sg)
-```
+Select the region in **Dashboard → Profile → Qoder API Provider → API Region**. Default is `sg` (Singapore).
 
 ### Dynamic URL Resolution
 
@@ -791,11 +789,11 @@ All Qoder API calls use dynamic URL functions:
 
 Example:
 ```javascript
-// QODER_API_REGION=us
+// Region: us
 getQoderChatUrl()
 // → "https://api1.qoder.sh/algo/api/v2/service/pro/sse/agent_chat_generation?FetchKeys=llm_model_result&AgentId=agent_common&Encode=1"
 
-// QODER_API_REGION=sg (default)
+// Region: sg (default)
 getQoderChatUrl()
 // → "https://api2.qoder.sh/algo/api/v2/service/pro/sse/agent_chat_generation?..."
 ```
@@ -816,51 +814,35 @@ getQoderChatUrl()
 
 ### Invalid Values
 
-Invalid region values (e.g., `eu`, `invalid`, empty string) fall back to `sg`:
-```javascript
-process.env.QODER_API_REGION = "eu";
-getQoderRegion(); // → "sg"
-```
+Invalid region values (e.g., `eu`, `invalid`) fall back to `sg`. The value is case-insensitive and whitespace-trimmed.
 
-Case-insensitive and whitespace-trimmed:
-```javascript
-process.env.QODER_API_REGION = "  US  ";
-getQoderRegion(); // → "us"
-```
+## 11. Configuration
 
-## 11. Environment Variables
+### Dashboard Settings (Profile → Qoder API Provider)
 
-### Authentication
+All Qoder provider settings are configured via the dashboard UI. No `.env` configuration needed.
 
-| Variable | Description | Example |
-|----------|-------------|---------|
-| `QODER_API_KEY` | Personal Access Token (PAT) for qoder-api provider | `pt-ng52Qyv...` |
+| Setting | Description | Default |
+|---------|-------------|---------|
+| API Region | Regional inference host (`sg`, `jp`, `us`) | `sg` |
+| COSY Version | Protocol version for COSY header signing | `2.11.2` |
+| MITM DNS Bypass | Enable DNS bypass for enterprise firewalls | `false` |
+| Extra Bypass Hosts | Comma-separated additional hosts to bypass | _(empty)_ |
 
-### Regional Routing
+Default values are defined in `src/lib/qoder/constants.js` as `QODER_DEFAULTS`.
 
-| Variable | Description | Default | Example |
-|----------|-------------|---------|---------|
-| `QODER_API_REGION` | Regional inference host (`us`, `sg`, `jp`) | `sg` | `jp` |
+### Provider Credentials
 
-### COSY Protocol
+| Variable | Description | Where |
+|----------|-------------|-------|
+| `QODER_API_KEY` | Personal Access Token (PAT) for qoder-api provider | Dashboard → Providers → Qoder API |
 
-| Variable | Description | Default | Example |
-|----------|-------------|---------|---------|
-| `QODER_COSY_VERSION` | COSY protocol version | `2.11.2` | `2.12.0` |
+### Proxy (Profile → Network)
 
-### Network Bypass
-
-| Variable | Description | Example |
-|----------|-------------|---------|
-| `MITM_BYPASS_QODER` | Enable DNS bypass for enterprise firewalls | `true` |
-| `MITM_BYPASS_EXTRA_HOSTS` | Additional hosts to bypass | `custom.api.com` |
-
-### Proxy
-
-| Variable | Description | Example |
-|----------|-------------|---------|
-| `HTTP_PROXY` | HTTP proxy URL | `http://proxy:8080` |
-| `HTTPS_PROXY` | HTTPS proxy URL | `http://proxy:8080` |
+| Setting | Description | Example |
+|---------|-------------|---------|
+| Outbound Proxy | HTTP proxy URL for upstream provider calls | `http://proxy:8080` |
+| No Proxy | Comma-separated hostnames to bypass proxy | `localhost,127.0.0.1` |
 
 ## 12. Model Configuration
 
