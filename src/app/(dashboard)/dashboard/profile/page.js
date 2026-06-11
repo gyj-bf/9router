@@ -1116,13 +1116,13 @@ export default function ProfilePage() {
 
               <div className="flex flex-col gap-2">
                 <label className="font-medium text-sm sm:text-base">COSY Version</label>
+                <p className="text-xs sm:text-sm text-text-muted">Protocol version for COSY header signing.</p>
                 <Input
                   placeholder="2.11.2"
                   value={qoderForm.qoderCosyVersion}
                   onChange={(e) => setQoderForm((prev) => ({ ...prev, qoderCosyVersion: e.target.value }))}
                   disabled={qoderLoading}
                 />
-                <p className="text-xs sm:text-sm text-text-muted">Protocol version for COSY header signing.</p>
               </div>
             </div>
 
