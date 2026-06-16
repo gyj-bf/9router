@@ -15,10 +15,10 @@
 import { createHash } from "crypto";
 
 import { proxyAwareFetch } from "../utils/proxyFetch.js";
-import { buildCosyHeaders } from "@/lib/qoder/cosy.js";
+import { buildCosyHeaders } from "../shared/qoder/cosy.js";
 import {
-  getQoderModelListUrl,
-} from "@/lib/qoder/constants.js";
+  QODER_MODEL_LIST_URL,
+} from "../shared/qoder/constants.js";
 
 const FETCH_TIMEOUT_MS = 15_000;
 const CACHE_TTL_MS = 60 * 60 * 1000; // 1h, same as the Kiro catalog
@@ -68,11 +68,10 @@ async function fetchQoderCatalogRaw(credentials, signal, proxyOptions = null) {
   const creds = cosyCredsFromConnection(credentials);
   if (!creds.userId || !creds.authToken) return null;
 
-  const modelListUrl = getQoderModelListUrl();
   const headers = {
     Accept: "application/json",
     "Accept-Encoding": "identity",
-    ...buildCosyHeaders(Buffer.alloc(0), modelListUrl, creds),
+    ...buildCosyHeaders(Buffer.alloc(0), QODER_MODEL_LIST_URL, creds),
   };
 
   const controller = new AbortController();
@@ -93,7 +92,7 @@ async function fetchQoderCatalogRaw(credentials, signal, proxyOptions = null) {
       }
     }
     response = await proxyAwareFetch(
-      modelListUrl,
+      QODER_MODEL_LIST_URL,
       {
         method: "GET",
         headers,
