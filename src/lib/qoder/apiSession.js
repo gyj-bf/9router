@@ -1,6 +1,7 @@
 import crypto from "crypto";
 
 import { qoderEncodeBody } from "./encoding.js";
+import { QODER_SESSION_TIMEOUT_MS } from "../../../open-sse/shared/qoder/constants.js";
 import { proxyAwareFetch } from "../../../open-sse/utils/proxyFetch.js";
 
 export const QODER_API_JOB_TOKEN_URL = "https://center.qoder.sh/algo/api/v3/user/jobToken?Encode=1";
@@ -57,7 +58,7 @@ function parseExpiresAt(value) {
   return Date.now() + DEFAULT_SESSION_TTL_MS;
 }
 
-export async function exchangeQoderApiToken(token, options = {}, proxyOptions = null) {
+export async function exchangeQoderApiToken(token, options = {}, proxyOptions = null, callerSignal = null) {
   if (!token || typeof token !== "string" || token.trim() === "") {
     throw new Error("Qoder API credential is required");
   }
@@ -77,6 +78,11 @@ export async function exchangeQoderApiToken(token, options = {}, proxyOptions = 
   const encodedBody = qoderEncodeBody(Buffer.from(JSON.stringify(payload), "utf8"));
   const date = formatQoderDate();
 
+  const timeoutSignal = AbortSignal.timeout(QODER_SESSION_TIMEOUT_MS);
+  const signal = callerSignal
+    ? AbortSignal.any([callerSignal, timeoutSignal])
+    : timeoutSignal;
+
   const response = await proxyAwareFetch(QODER_API_JOB_TOKEN_URL, {
     method: "POST",
     headers: {
@@ -95,6 +101,7 @@ export async function exchangeQoderApiToken(token, options = {}, proxyOptions = 
       "user-agent": "Go-http-client/2.0",
     },
     body: encodedBody,
+    signal,
   }, proxyOptions);
 
   if (!response.ok) {

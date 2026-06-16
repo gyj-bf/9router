@@ -22,6 +22,14 @@ import {
   QODER_MAX_RETRIES,
   QODER_RETRYABLE_STATUSES,
   QODER_CONNECT_TIMEOUT_MS,
+  QODER_PEEK_TIMEOUT_MS,
+  QODER_PEEK_BUFFER_CAP,
+  QODER_SESSION_TIMEOUT_MS,
+  QODER_TEST_TIMEOUT_MS,
+  QODER_STALL_TIMEOUT_MS,
+  QODER_REQUEST_TIMEOUT_MS,
+  QODER_MODEL_CONFIG_MAP,
+  QODER_MODEL_MAP,
 } from "../../src/lib/qoder/constants.js";
 
 // ── Helpers ────────────────────────────────────────────────────────────────
@@ -880,6 +888,30 @@ describe("qoder-api retry constants", () => {
   it("QODER_CONNECT_TIMEOUT_MS is 30 seconds", () => {
     expect(QODER_CONNECT_TIMEOUT_MS).toBe(30_000);
   });
+
+  it("QODER_PEEK_TIMEOUT_MS is 10 seconds", () => {
+    expect(QODER_PEEK_TIMEOUT_MS).toBe(10_000);
+  });
+
+  it("QODER_PEEK_BUFFER_CAP is 64KB", () => {
+    expect(QODER_PEEK_BUFFER_CAP).toBe(65_536);
+  });
+
+  it("QODER_SESSION_TIMEOUT_MS is 15 seconds", () => {
+    expect(QODER_SESSION_TIMEOUT_MS).toBe(15_000);
+  });
+
+  it("QODER_TEST_TIMEOUT_MS is 15 seconds", () => {
+    expect(QODER_TEST_TIMEOUT_MS).toBe(15_000);
+  });
+
+  it("QODER_STALL_TIMEOUT_MS is 60 seconds", () => {
+    expect(QODER_STALL_TIMEOUT_MS).toBe(60_000);
+  });
+
+  it("QODER_REQUEST_TIMEOUT_MS is 120 seconds", () => {
+    expect(QODER_REQUEST_TIMEOUT_MS).toBe(120_000);
+  });
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -996,5 +1028,63 @@ describe("qoder-api peekFirstFrame (queue error → fallback)", () => {
     expect(result.response.status).toBe(503);
     const body = await result.response.json();
     expect(body.error.message).toContain("10 ahead");
+  });
+
+  it("does not leak timers when peek succeeds", async () => {
+    const normalChunk = JSON.stringify({ choices: [{ delta: { content: "Hi" }, finish_reason: null }] });
+    const sseFrame = `data: ${JSON.stringify({ statusCodeValue: 200, body: normalChunk })}\n\ndata: [DONE]\n\n`;
+
+    proxyAwareFetch.mockResolvedValueOnce(makeStreamingResponse([sseFrame]));
+
+    const executor = new QoderApiExecutor();
+    const resultPromise = executor.execute({
+      ...EXECUTE_ARGS,
+      credentials: makeCredentials(),
+    });
+    await vi.advanceTimersByTimeAsync(0);
+    const result = await resultPromise;
+
+    expect(result.response.status).toBe(200);
+    await vi.advanceTimersByTimeAsync(QODER_PEEK_TIMEOUT_MS + 1000);
+
+    vi.useRealTimers();
+  });
+});
+
+// ─── QODER_MODEL_CONFIG_MAP validation ─────────────────────────────────────
+
+describe("QODER_MODEL_CONFIG_MAP validation", () => {
+  it("contains all models from QODER_MODEL_MAP", () => {
+    for (const key of Object.keys(QODER_MODEL_MAP)) {
+      expect(QODER_MODEL_CONFIG_MAP).toHaveProperty(key);
+    }
+  });
+
+  it("all configs have required fields", () => {
+    for (const [key, config] of Object.entries(QODER_MODEL_CONFIG_MAP)) {
+      expect(config).toHaveProperty("display_name");
+      expect(config).toHaveProperty("is_reasoning");
+      expect(config).toHaveProperty("is_vl");
+      expect(config).toHaveProperty("format");
+      expect(config).toHaveProperty("source");
+      expect(config).toHaveProperty("max_input_tokens");
+      expect(typeof config.display_name).toBe("string");
+      expect(typeof config.is_reasoning).toBe("boolean");
+      expect(typeof config.is_vl).toBe("boolean");
+      expect(config.max_input_tokens).toBeGreaterThan(0);
+    }
+  });
+
+  it("reasoning models are correctly marked", () => {
+    expect(QODER_MODEL_CONFIG_MAP.dmodel.is_reasoning).toBe(true);
+    expect(QODER_MODEL_CONFIG_MAP.dfmodel.is_reasoning).toBe(true);
+    expect(QODER_MODEL_CONFIG_MAP.gm51model.is_reasoning).toBe(true);
+    expect(QODER_MODEL_CONFIG_MAP.qmodel_latest.is_reasoning).toBe(false);
+    expect(QODER_MODEL_CONFIG_MAP.kmodel.is_reasoning).toBe(false);
+  });
+
+  it("display names are up to date", () => {
+    expect(QODER_MODEL_CONFIG_MAP.dfmodel.display_name).toBe("DeepSeek-V4-Flash");
+    expect(QODER_MODEL_CONFIG_MAP.dmodel.display_name).toBe("DeepSeek-V4-Pro");
   });
 });

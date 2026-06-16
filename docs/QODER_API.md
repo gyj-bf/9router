@@ -930,18 +930,18 @@ The qoder-api provider uses static model configurations (no live fetch from `/al
 
 | Model Key | Display Name | Reasoning | Vision | Max Input Tokens |
 |-----------|--------------|-----------|--------|------------------|
-| `auto` | Auto | ❌ | ❌ | 180,000 |
-| `ultimate` | Ultimate | ❌ | ❌ | 180,000 |
-| `performance` | Performance | ❌ | ❌ | 180,000 |
-| `efficient` | Efficient | ❌ | ❌ | 131,072 |
-| `lite` | Lite (Free tier) | ❌ | ❌ | 131,072 |
-| `qmodel_latest` | Qwen 3.7 Max | ❌ | ❌ | 180,000 |
-| `qmodel` | Qwen 3.6 Plus | ❌ | ❌ | 180,000 |
-| `dmodel` | DeepSeek V4 Pro | ✅ | ❌ | 180,000 |
-| `dfmodel` | DeepSeek V4 | ✅ | ❌ | 180,000 |
-| `gm51model` | GLM 5.1 | ✅ | ❌ | 131,072 |
-| `kmodel` | Kimi K2.6 | ❌ | ❌ | 180,000 |
-| `mmodel` | MiniMax M2.7 | ❌ | ❌ | 180,000 |
+| `auto` | Auto | ❌ | ✅ | 180,000 |
+| `ultimate` | Ultimate | ✅ | ✅ | 180,000 |
+| `performance` | Performance | ❌ | ✅ | 272,000 |
+| `efficient` | Efficient | ❌ | ✅ | 180,000 |
+| `lite` | Lite | ❌ | ✅ | 180,000 |
+| `qmodel_latest` | Qwen3.7-Max | ❌ | ✅ | 180,000 |
+| `qmodel` | Qwen3.7-Plus | ❌ | ✅ | 180,000 |
+| `dmodel` | DeepSeek-V4-Pro | ✅ | ✅ | 180,000 |
+| `dfmodel` | DeepSeek-V4-Flash | ✅ | ✅ | 180,000 |
+| `gm51model` | GLM-5.1 | ✅ | ✅ | 180,000 |
+| `kmodel` | Kimi-K2.7-Code | ❌ | ✅ | 256,000 |
+| `mmodel` | MiniMax-M3 | ❌ | ✅ | 180,000 |
 
 ### Default Parameters
 
@@ -952,22 +952,21 @@ DEFAULT_TEMPERATURE = 0.1          // Low randomness for coding
 
 ### Timeout & Retry Constants
 
+All timeout and retry constants are centralized in `open-sse/shared/qoder/constants.js` for easy maintenance:
+
 ```javascript
-QODER_CONNECT_TIMEOUT_MS = 30_000  // 30s per attempt (upstream must send headers within this)
-QODER_MAX_RETRIES = 3              // Max retry attempts for transient errors (502, 503, 504)
+QODER_CONNECT_TIMEOUT_MS = 30_000   // 30s per attempt (upstream must send headers within this)
+QODER_MAX_RETRIES = 3               // Max retry attempts for transient errors (502, 503, 504)
 QODER_RETRYABLE_STATUSES = [502, 503, 504]  // HTTP statuses that trigger retry
+QODER_PEEK_TIMEOUT_MS = 10_000      // 10s max to read first SSE frame (pre-flight check)
+QODER_PEEK_BUFFER_CAP = 65_536      // 64KB max buffer during peek
+QODER_SESSION_TIMEOUT_MS = 15_000   // 15s for token exchange and provider test
 ```
 
 **Provider registry timeouts:**
 ```javascript
-timeoutMs: 120_000       // Overall fetch timeout
-stallTimeoutMs: 90_000   // Stream stall detection (90s of no data = dead stream)
-```
-
-**Internal constants (not configurable):**
-```javascript
-PEEK_TIMEOUT_MS = 10_000   // Max time to wait for first SSE frame during pre-flight check
-PEEK_BUFFER_CAP = 65_536   // Max buffer size during peek (64KB)
+QODER_REQUEST_TIMEOUT_MS = 120_000  // Overall fetch timeout
+QODER_STALL_TIMEOUT_MS = 60_000    // Stream stall detection (60s of no data = dead stream)
 ```
 
 See section 14 for how these constants interact in the retry and resilience system.
@@ -979,9 +978,10 @@ Vision capability (`is_vl: true`) is auto-detected when images are present in me
 ### Reasoning Models
 
 Models with `is_reasoning: true` by default:
-- `dmodel` (DeepSeek V4 Pro)
-- `dfmodel` (DeepSeek V4)
-- `gm51model` (GLM 5.1)
+- `ultimate` (Ultimate)
+- `dmodel` (DeepSeek-V4-Pro)
+- `dfmodel` (DeepSeek-V4-Flash)
+- `gm51model` (GLM-5.1)
 
 Other models can be forced into reasoning mode via `reasoning_effort`, `thinking.type`, or `enable_thinking` parameters (see section 4).
 
@@ -1202,7 +1202,7 @@ After a successful HTTP 200 response, the executor reads the first SSE frame bef
 |----------|-------------|-------|
 | All connect timeouts | 4 × 30s + 7s backoff | **127s** |
 | Queue error (fast path) | 1 × connect + peek | **~3-5s** |
-| Stream stall (mid-stream) | stallTimeoutMs | **90s** |
+| Stream stall (mid-stream) | stallTimeoutMs | **60s** |
 | 10 accounts all queued | 10 × ~3s + combo cooldown | **~35s** |
 
 ### Fallback Integration
@@ -1224,6 +1224,8 @@ The executor's error responses are designed to integrate with 9Router's multi-la
 | `QODER_MAX_RETRIES` | 3 | `shared/qoder/constants.js` | Max retry attempts |
 | `QODER_RETRYABLE_STATUSES` | `{502, 503, 504}` | `shared/qoder/constants.js` | HTTP statuses to retry |
 | `QODER_CONNECT_TIMEOUT_MS` | 30,000ms | `shared/qoder/constants.js` | Per-attempt connect timeout |
-| `stallTimeoutMs` | 90,000ms | `providers/registry/qoder-api.js` | Stream stall detection |
-| `PEEK_TIMEOUT_MS` | 10,000ms | `executors/qoderApi.js` | First frame peek timeout |
-| `PEEK_BUFFER_CAP` | 65,536 bytes | `executors/qoderApi.js` | Peek buffer size limit |
+| `QODER_PEEK_TIMEOUT_MS` | 10,000ms | `shared/qoder/constants.js` | First frame peek timeout |
+| `QODER_PEEK_BUFFER_CAP` | 65,536 bytes | `shared/qoder/constants.js` | Peek buffer size limit |
+| `QODER_SESSION_TIMEOUT_MS` | 15,000ms | `shared/qoder/constants.js` | Token exchange & provider test timeout |
+| `QODER_STALL_TIMEOUT_MS` | 60,000ms | `shared/qoder/constants.js` | Stream stall detection (used by both `qoder-api.js` and `qoder.js` registries) |
+| `QODER_REQUEST_TIMEOUT_MS` | 120,000ms | `shared/qoder/constants.js` | Overall fetch timeout (used by both registries) |

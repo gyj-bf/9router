@@ -109,6 +109,12 @@ export const DEFAULT_TEMPERATURE = 0.1;
 export const QODER_MAX_RETRIES = 3;
 export const QODER_RETRYABLE_STATUSES = new Set([502, 503, 504]);
 export const QODER_CONNECT_TIMEOUT_MS = 30_000;
+export const QODER_PEEK_TIMEOUT_MS = 10_000;
+export const QODER_PEEK_BUFFER_CAP = 65_536;
+export const QODER_SESSION_TIMEOUT_MS = 15_000;    // token exchange timeout
+export const QODER_TEST_TIMEOUT_MS = 15_000;        // provider test probe timeout
+export const QODER_STALL_TIMEOUT_MS = 60_000;
+export const QODER_REQUEST_TIMEOUT_MS = 120_000;
 
 export const QODER_MACHINE_OS_OPTIONS = [
   "x86_64_darwin",
@@ -122,16 +128,16 @@ export const QODER_MACHINE_OS_OPTIONS = [
 export const QODER_ACTIVITY_URL = `${QODER_CENTER_BASE}/algo/api/v2/activity`;
 
 export const QODER_MODEL_CONFIG_MAP = {
-  auto: { display_name: "Auto", is_reasoning: false, is_vl: false, format: "openai", source: "system", max_input_tokens: 180000 },
-  ultimate: { display_name: "Ultimate", is_reasoning: false, is_vl: false, format: "openai", source: "system", max_input_tokens: 180000 },
-  performance: { display_name: "Performance", is_reasoning: false, is_vl: false, format: "openai", source: "system", max_input_tokens: 180000 },
-  efficient: { display_name: "Efficient", is_reasoning: false, is_vl: false, format: "openai", source: "system", max_input_tokens: 131072 },
-  lite: { display_name: "Lite", is_reasoning: false, is_vl: false, format: "openai", source: "system", max_input_tokens: 131072 },
-  qmodel_latest: { display_name: "Qwen 3.7 Max", model: "qwen3-max-latest", is_reasoning: false, is_vl: false, format: "openai", source: "system", max_input_tokens: 180000 },
-  qmodel: { display_name: "Qwen 3.6 Plus", model: "qwen3.6-plus", is_reasoning: false, is_vl: false, format: "openai", source: "system", max_input_tokens: 180000 },
-  dmodel: { display_name: "DeepSeek V4 Pro", model: "deepseek-v4-pro", is_reasoning: true, is_vl: false, format: "openai", source: "system", max_input_tokens: 180000 },
-  dfmodel: { display_name: "DeepSeek V4", model: "deepseek-v4", is_reasoning: true, is_vl: false, format: "openai", source: "system", max_input_tokens: 180000 },
-  gm51model: { display_name: "GLM 5.1", model: "glm-5.1", is_reasoning: true, is_vl: false, format: "openai", source: "system", max_input_tokens: 131072 },
-  kmodel: { display_name: "Kimi K2.6", model: "kimi-k2.6", is_reasoning: false, is_vl: false, format: "openai", source: "system", max_input_tokens: 180000 },
-  mmodel: { display_name: "MiniMax M2.7", model: "minimax-m2.7", is_reasoning: false, is_vl: false, format: "openai", source: "system", max_input_tokens: 180000 },
+  auto: { display_name: "Auto", is_reasoning: false, is_vl: true, format: "openai", source: "system", max_input_tokens: 180000 },
+  ultimate: { display_name: "Ultimate", is_reasoning: true, is_vl: true, format: "openai", source: "system", max_input_tokens: 180000 },
+  performance: { display_name: "Performance", is_reasoning: false, is_vl: true, format: "openai", source: "system", max_input_tokens: 272000 },
+  efficient: { display_name: "Efficient", is_reasoning: false, is_vl: true, format: "openai", source: "system", max_input_tokens: 180000 },
+  lite: { display_name: "Lite", is_reasoning: false, is_vl: true, format: "openai", source: "system", max_input_tokens: 180000 },
+  qmodel_latest: { display_name: "Qwen3.7-Max", is_reasoning: false, is_vl: true, format: "openai", source: "system", max_input_tokens: 180000 },
+  qmodel: { display_name: "Qwen3.7-Plus", is_reasoning: false, is_vl: true, format: "openai", source: "system", max_input_tokens: 180000 },
+  gm51model: { display_name: "GLM-5.1", is_reasoning: true, is_vl: true, format: "openai", source: "system", max_input_tokens: 180000 },
+  kmodel: { display_name: "Kimi-K2.7-Code", is_reasoning: false, is_vl: true, format: "openai", source: "system", max_input_tokens: 256000 },
+  dmodel: { display_name: "DeepSeek-V4-Pro", is_reasoning: true, is_vl: true, format: "openai", source: "system", max_input_tokens: 180000 },
+  dfmodel: { display_name: "DeepSeek-V4-Flash", is_reasoning: true, is_vl: true, format: "openai", source: "system", max_input_tokens: 180000 },
+  mmodel: { display_name: "MiniMax-M3", is_reasoning: false, is_vl: true, format: "openai", source: "system", max_input_tokens: 180000 },
 };

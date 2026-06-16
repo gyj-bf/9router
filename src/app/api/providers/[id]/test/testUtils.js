@@ -18,6 +18,7 @@ import {
   KILOCODE_CONFIG,
 } from "@/lib/oauth/constants/oauth";
 import { buildClineHeaders } from "@/shared/utils/clineAuth";
+import { QODER_TEST_TIMEOUT_MS } from "open-sse/shared/qoder/constants.js";
 
 // OAuth provider test endpoints
 const OAUTH_TEST_CONFIG = {
@@ -73,6 +74,7 @@ const OAUTH_TEST_CONFIG = {
     authHeader: "Authorization",
     authPrefix: "Bearer ",
     refreshable: false,
+    timeoutMs: QODER_TEST_TIMEOUT_MS,
   },
   "kimi-coding": { checkExpiry: true, refreshable: false },
   cursor: { tokenExists: true },
@@ -285,6 +287,7 @@ async function testOAuthConnection(connection, effectiveProxy = null) {
       : { [config.authHeader]: `${config.authPrefix}${accessToken}`, ...config.extraHeaders };
     const fetchOpts = { method: config.method, headers };
     if (config.body) fetchOpts.body = config.body;
+    if (config.timeoutMs) fetchOpts.signal = AbortSignal.timeout(config.timeoutMs);
     const res = await fetchWithConnectionProxy(testUrl, fetchOpts, effectiveProxy);
 
     const accepted = res.ok || (config.acceptStatuses && config.acceptStatuses.includes(res.status));
@@ -401,9 +404,12 @@ async function testApiKeyConnection(connection, effectiveProxy = null) {
       case "qoder-api": {
         try {
           const { exchangeQoderApiToken } = await import("@/lib/qoder/apiSession.js");
-          await exchangeQoderApiToken(connection.apiKey, connection.providerSpecificData?.qoderApiSession || {});
+          await exchangeQoderApiToken(connection.apiKey, connection.providerSpecificData?.qoderApiSession || {}, effectiveProxy);
           return { valid: true, error: null };
         } catch (err) {
+          if (err.name === "TimeoutError" || err.name === "AbortError") {
+            return { valid: false, error: `Connection timed out (${QODER_TEST_TIMEOUT_MS / 1000}s)` };
+          }
           return { valid: false, error: err.message || "Invalid Qoder API credential" };
         }
       }

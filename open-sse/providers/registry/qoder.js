@@ -1,3 +1,5 @@
+import { QODER_STALL_TIMEOUT_MS, QODER_REQUEST_TIMEOUT_MS } from "../../shared/qoder/constants.js";
+
 export default {
   id: "qoder",
   priority: 30,
@@ -18,8 +20,8 @@ export default {
   transport: {
     baseUrl: "https://api3.qoder.sh/algo/api/v2/service/pro/sse/agent_chat_generation",
     headers: {},
-    timeoutMs: 120000,
-    stallTimeoutMs: 90000,
+    timeoutMs: QODER_REQUEST_TIMEOUT_MS,
+    stallTimeoutMs: QODER_STALL_TIMEOUT_MS,
     usage: {
       url: "https://openapi.qoder.sh/api/v2/quota/usage",
     },
@@ -30,13 +32,13 @@ export default {
     { id: "performance", name: "Qoder Performance" },
     { id: "efficient", name: "Qoder Efficient" },
     { id: "lite", name: "Qoder Lite" },
-    { id: "qmodel", name: "Qwen 3.6 Plus (Qoder)" },
-    { id: "qmodel_latest", name: "Qoder Qwen 3.7 Max" },
-    { id: "dmodel", name: "DeepSeek V4 Pro (Qoder)" },
-    { id: "dfmodel", name: "DeepSeek V4 Flash (Qoder)" },
-    { id: "gm51model", name: "GLM 5.1 (Qoder)" },
-    { id: "kmodel", name: "Kimi K2.6 (Qoder)" },
-    { id: "mmodel", name: "MiniMax M2.7 (Qoder)" },
+    { id: "qmodel_latest", name: "Qwen3.7-Max (Qoder)" },
+    { id: "qmodel", name: "Qwen3.7-Plus (Qoder)" },
+    { id: "dmodel", name: "DeepSeek-V4-Pro (Qoder)" },
+    { id: "dfmodel", name: "DeepSeek-V4-Flash (Qoder)" },
+    { id: "gm51model", name: "GLM-5.1 (Qoder)" },
+    { id: "kmodel", name: "Kimi-K2.7-Code (Qoder)" },
+    { id: "mmodel", name: "MiniMax-M3 (Qoder)" },
   ],
   oauth: {
     openApiBaseUrl: "https://openapi.qoder.sh",

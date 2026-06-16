@@ -11,6 +11,8 @@ import {
   QODER_MAX_RETRIES,
   QODER_RETRYABLE_STATUSES,
   QODER_CONNECT_TIMEOUT_MS,
+  QODER_PEEK_TIMEOUT_MS,
+  QODER_PEEK_BUFFER_CAP,
 } from "../../src/lib/qoder/constants.js";
 import { qoderEncodeBody } from "../../src/lib/qoder/encoding.js";
 import { buildCosyHeaders } from "../../src/lib/qoder/cosy.js";
@@ -464,47 +466,54 @@ export function wrapQoderApiSSE(response, model = "qoder-api/lite") {
   });
 }
 
-const PEEK_TIMEOUT_MS = 10_000;
-const PEEK_BUFFER_CAP = 65_536;
-
-async function peekFirstFrame(response) {
+async function peekFirstFrame(response, signal) {
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
-  let firstFrameData = null;
+  let peekedBytes = null;
   let firstFrameRaw = null;
+  let bufferOverflow = false;
 
   const emptyStream = () => new ReadableStream({ start(c) { c.close(); } });
 
   try {
-    const peekDeadline = Date.now() + PEEK_TIMEOUT_MS;
+    const peekDeadline = Date.now() + QODER_PEEK_TIMEOUT_MS;
 
     while (true) {
+      if (signal?.aborted) break;
+
       const remaining = peekDeadline - Date.now();
       if (remaining <= 0) {
         break;
       }
 
-      const timeoutPromise = new Promise((_, reject) =>
-        setTimeout(() => reject(new Error("peek timeout")), Math.min(remaining, PEEK_TIMEOUT_MS))
-      );
+      let timeoutId;
+      const timeoutPromise = new Promise((_, reject) => {
+        timeoutId = setTimeout(() => reject(new Error("peek timeout")), Math.min(remaining, QODER_PEEK_TIMEOUT_MS));
+      });
 
       let chunk;
       try {
         chunk = await Promise.race([reader.read(), timeoutPromise]);
       } catch {
+        clearTimeout(timeoutId);
+        reader.cancel().catch(() => {});
         break;
       }
+      clearTimeout(timeoutId);
 
       if (chunk.done) break;
       buffer += decoder.decode(chunk.value, { stream: true });
 
-      if (buffer.length > PEEK_BUFFER_CAP) break;
+      if (buffer.length > QODER_PEEK_BUFFER_CAP) {
+        bufferOverflow = true;
+        break;
+      }
 
       const nlIndex = buffer.indexOf("\n");
       if (nlIndex !== -1) {
         firstFrameRaw = buffer.slice(0, nlIndex);
-        firstFrameData = new TextEncoder().encode(buffer);
+        peekedBytes = new TextEncoder().encode(buffer);
         break;
       }
     }
@@ -513,9 +522,9 @@ async function peekFirstFrame(response) {
     return { isQueueError: false, peekError: e, remainingStream: emptyStream() };
   }
 
-  if (!firstFrameData) {
+  if (!peekedBytes) {
     reader.cancel().catch(() => {});
-    return { isQueueError: false, firstFrameData: null, remainingStream: emptyStream() };
+    return { isQueueError: false, firstFrameData: null, bufferOverflow, remainingStream: emptyStream() };
   }
 
   const trimmed = firstFrameRaw.replace(/\r$/, "").trim();
@@ -530,10 +539,10 @@ async function peekFirstFrame(response) {
           const queueInfo = parseQueueError(inner);
           if (queueInfo) {
             reader.cancel().catch(() => {});
-            return { isQueueError: true, queueInfo, firstFrameData, remainingStream: null };
+            return { isQueueError: true, queueInfo, firstFrameData: peekedBytes, remainingStream: null };
           }
           reader.cancel().catch(() => {});
-          return { isQueueError: false, upstreamStatus: statusValue, upstreamBody: inner, firstFrameData, remainingStream: null };
+          return { isQueueError: false, upstreamStatus: statusValue, upstreamBody: inner, firstFrameData: peekedBytes, remainingStream: null };
         }
       } catch {}
     }
@@ -541,7 +550,7 @@ async function peekFirstFrame(response) {
 
   const remainingStream = new ReadableStream({
     start(controller) {
-      controller.enqueue(firstFrameData);
+      controller.enqueue(peekedBytes);
       return (async () => {
         try {
           while (true) {
@@ -558,7 +567,7 @@ async function peekFirstFrame(response) {
     },
   });
 
-  return { isQueueError: false, firstFrameData, remainingStream };
+  return { isQueueError: false, firstFrameData: peekedBytes, remainingStream };
 }
 
 export class QoderApiExecutor {
@@ -573,7 +582,7 @@ export class QoderApiExecutor {
     return typeof value === "object" ? value : { key: modelKey, source: "system" };
   }
 
-  async ensureSession(credentials, onCredentialsRefreshed, proxyOptions = null) {
+  async ensureSession(credentials, onCredentialsRefreshed, proxyOptions = null, signal = null) {
     if (!credentials?.apiKey) {
       logger.error(LOG_TAG, "Missing API key in credentials");
       throw new Error("Qoder API key is required");
@@ -587,7 +596,7 @@ export class QoderApiExecutor {
     }
     
     try {
-      const session = await exchangeQoderApiToken(credentials?.apiKey, cached || {}, proxyOptions);
+      const session = await exchangeQoderApiToken(credentials?.apiKey, cached || {}, proxyOptions, signal);
       
       const nextProviderSpecificData = {
         ...providerSpecificData,
@@ -616,7 +625,7 @@ export class QoderApiExecutor {
 
     let session;
     try {
-      session = await this.ensureSession(credentials || {}, onCredentialsRefreshed, proxyOptions);
+      session = await this.ensureSession(credentials || {}, onCredentialsRefreshed, proxyOptions, signal);
     } catch (error) {
       logger.error(LOG_TAG, "Session initialization failed", {
         requestId,
@@ -844,7 +853,11 @@ export class QoderApiExecutor {
       status: response.status,
     });
 
-    const peek = await peekFirstFrame(response);
+    const peek = await peekFirstFrame(response, signal);
+
+    if (peek.bufferOverflow) {
+      logger.warn(LOG_TAG, "Peek buffer exceeded cap, error detection skipped", { requestId });
+    }
 
     if (peek.isQueueError) {
       const q = peek.queueInfo;
