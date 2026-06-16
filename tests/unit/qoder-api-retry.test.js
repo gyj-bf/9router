@@ -1088,3 +1088,240 @@ describe("QODER_MODEL_CONFIG_MAP validation", () => {
     expect(QODER_MODEL_CONFIG_MAP.dmodel.display_name).toBe("DeepSeek-V4-Pro");
   });
 });
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 7. Reactive model-not-enabled detection (via peekFirstFrame)
+// ═══════════════════════════════════════════════════════════════════════════
+
+describe("qoder-api reactive model-not-enabled detection", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-06-02T00:00:00.000Z"));
+    vi.clearAllMocks();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  function makeStreamingResponse(frames) {
+    const encoder = new TextEncoder();
+    return new Response(
+      new ReadableStream({
+        start(controller) {
+          for (const frame of frames) {
+            controller.enqueue(encoder.encode(frame));
+          }
+          controller.close();
+        },
+      }),
+      { status: 200, headers: { "content-type": "text/event-stream" } },
+    );
+  }
+
+  it("returns 403 when model is not enabled (reactive)", async () => {
+    const errorBody = JSON.stringify({ code: "model_not_enabled", message: "Model 'ultimate' is not enabled for this account" });
+    const sseFrame = `data: ${JSON.stringify({ statusCodeValue: 403, body: errorBody })}\n\n`;
+
+    proxyAwareFetch.mockResolvedValueOnce(makeStreamingResponse([sseFrame]));
+
+    const executor = new QoderApiExecutor();
+    const resultPromise = executor.execute({
+      ...EXECUTE_ARGS,
+      model: "qoder-api/ultimate",
+      body: { model: "qoder-api/ultimate", messages: [{ role: "user", content: "hello" }], stream: true },
+      credentials: makeCredentials(),
+    });
+    await vi.advanceTimersByTimeAsync(0);
+    const result = await resultPromise;
+
+    expect(result.response.status).toBe(403);
+    const body = await result.response.json();
+    expect(body.error.type).toBe("model_not_enabled");
+    expect(body.error.message).toContain("not enabled");
+    expect(body.error.message).toContain("qmodel_latest");
+  });
+
+  it("returns 403 for 403 with 'not available for' pattern", async () => {
+    const errorBody = JSON.stringify({ message: "This model is not available for your plan tier" });
+    const sseFrame = `data: ${JSON.stringify({ statusCodeValue: 403, body: errorBody })}\n\n`;
+
+    proxyAwareFetch.mockResolvedValueOnce(makeStreamingResponse([sseFrame]));
+
+    const executor = new QoderApiExecutor();
+    const resultPromise = executor.execute({
+      ...EXECUTE_ARGS,
+      credentials: makeCredentials(),
+    });
+    await vi.advanceTimersByTimeAsync(0);
+    const result = await resultPromise;
+
+    expect(result.response.status).toBe(403);
+    const body = await result.response.json();
+    expect(body.error.type).toBe("model_not_enabled");
+  });
+
+  it("returns generic 502 for non-model 403 errors", async () => {
+    const errorBody = JSON.stringify({ message: "Forbidden access" });
+    const sseFrame = `data: ${JSON.stringify({ statusCodeValue: 403, body: errorBody })}\n\n`;
+
+    proxyAwareFetch.mockResolvedValueOnce(makeStreamingResponse([sseFrame]));
+
+    const executor = new QoderApiExecutor();
+    const resultPromise = executor.execute({
+      ...EXECUTE_ARGS,
+      credentials: makeCredentials(),
+    });
+    await vi.advanceTimersByTimeAsync(0);
+    const result = await resultPromise;
+
+    expect(result.response.status).toBe(502);
+  });
+
+  it("403 model-not-enabled takes priority over queue error (both patterns present)", async () => {
+    const queueMsg = JSON.stringify({ isQueued: true, queueCount: 10, queueType: "slow", waitTime: 600 });
+    const errorBody = JSON.stringify({ code: "model_not_enabled", message: queueMsg });
+    const sseFrame = `data: ${JSON.stringify({ statusCodeValue: 403, body: errorBody })}\n\n`;
+
+    proxyAwareFetch.mockResolvedValueOnce(makeStreamingResponse([sseFrame]));
+
+    const executor = new QoderApiExecutor();
+    const resultPromise = executor.execute({
+      ...EXECUTE_ARGS,
+      credentials: makeCredentials(),
+    });
+    await vi.advanceTimersByTimeAsync(0);
+    const result = await resultPromise;
+
+    expect(result.response.status).toBe(403);
+    const body = await result.response.json();
+    expect(body.error.type).toBe("model_not_enabled");
+  });
+
+  it("403 with queue error (isQueued: true) is NOT detected as model-not-enabled", async () => {
+    const queueData = { isQueued: true, serviceAvailable: false, queueCount: 10, queueType: "fast", waitTime: 60 };
+    const innerBody = buildQueueBody2Level(queueData);
+    const sseFrame = `data: ${JSON.stringify({ statusCodeValue: 403, body: innerBody })}\n\n`;
+
+    proxyAwareFetch.mockResolvedValueOnce(makeStreamingResponse([sseFrame]));
+
+    const executor = new QoderApiExecutor();
+    const resultPromise = executor.execute({
+      ...EXECUTE_ARGS,
+      credentials: makeCredentials(),
+    });
+    await vi.advanceTimersByTimeAsync(0);
+    const result = await resultPromise;
+
+    expect(result.response.status).toBe(503);
+    const body = await result.response.json();
+    expect(body.error.code).toBe("service_unavailable");
+    expect(body.error.message).toContain("queued");
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 8. parseModelNotEnabledError edge cases (via wrapQoderApiSSE)
+// ═══════════════════════════════════════════════════════════════════════════
+
+describe("parseModelNotEnabledError edge cases (via wrapQoderApiSSE)", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-06-02T00:00:00.000Z"));
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("returns null for empty body → generic error, not model-not-enabled", async () => {
+    const upstream = makeSSEEnvelope(403, "");
+    const text = await readStreamText(wrapQoderApiSSE(upstream));
+
+    expect(text).toContain("[Upstream provider error (code 403)]");
+    expect(text).not.toContain("Model not enabled for this account");
+  });
+
+  it("returns null for non-JSON body → generic error", async () => {
+    const upstream = makeSSEEnvelope(403, "this is not json at all");
+    const text = await readStreamText(wrapQoderApiSSE(upstream));
+
+    expect(text).toContain("[Upstream provider error (code 403)]");
+    expect(text).not.toContain("Model not enabled for this account");
+  });
+
+  it("403 with generic 'Forbidden' message does NOT match model-not-enabled", async () => {
+    const errorBody = JSON.stringify({ message: "Forbidden" });
+    const upstream = makeSSEEnvelope(403, errorBody);
+    const text = await readStreamText(wrapQoderApiSSE(upstream));
+
+    expect(text).toContain("[Upstream provider error (code 403)]");
+    expect(text).not.toContain("Model not enabled for this account");
+    expect(text).not.toContain("[Queue:");
+  });
+
+  it("403 with 'not enabled' in nested error.message matches", async () => {
+    const errorBody = JSON.stringify({ error: { message: "This model is not enabled for your account" } });
+    const upstream = makeSSEEnvelope(403, errorBody);
+    const text = await readStreamText(wrapQoderApiSSE(upstream));
+
+    expect(text).toContain("Model not enabled for this account");
+    expect(text).toContain("qmodel_latest");
+    expect(text).toMatch(/data: \[DONE\]/);
+  });
+
+  it("403 with 'UPGRADE your plan' (uppercase) matches (case-insensitive)", async () => {
+    const errorBody = JSON.stringify({ message: "UPGRADE your plan to access this model" });
+    const upstream = makeSSEEnvelope(403, errorBody);
+    const text = await readStreamText(wrapQoderApiSSE(upstream));
+
+    expect(text).toContain("Model not enabled for this account");
+    expect(text).toMatch(/data: \[DONE\]/);
+  });
+
+  it("403 with code 'model_not_enabled' but empty message matches", async () => {
+    const errorBody = JSON.stringify({ code: "model_not_enabled", message: "" });
+    const upstream = makeSSEEnvelope(403, errorBody);
+    const text = await readStreamText(wrapQoderApiSSE(upstream));
+
+    expect(text).toContain("Model not enabled for this account");
+    expect(text).toMatch(/data: \[DONE\]/);
+  });
+
+  it("500 status with 'not enabled' message does NOT match (only 403)", async () => {
+    const errorBody = JSON.stringify({ message: "Model is not enabled for this account" });
+    const upstream = makeSSEEnvelope(500, errorBody);
+    const text = await readStreamText(wrapQoderApiSSE(upstream));
+
+    expect(text).toContain("[Upstream provider error (code 500)]");
+    expect(text).not.toContain("Model not enabled for this account");
+  });
+
+  it("mid-stream 403 model-not-enabled emits error chunk after normal content", async () => {
+    const normalBody = JSON.stringify({ choices: [{ delta: { content: "Hello" }, finish_reason: null }] });
+    const errorBody = JSON.stringify({ code: "model_not_enabled", message: "Model not enabled" });
+
+    const normalFrame = `data: ${JSON.stringify({ statusCodeValue: 200, body: normalBody })}\n\n`;
+    const errorFrame = `data: ${JSON.stringify({ statusCodeValue: 403, body: errorBody })}\n\n`;
+
+    const encoder = new TextEncoder();
+    const upstream = new Response(
+      new ReadableStream({
+        start(controller) {
+          controller.enqueue(encoder.encode(normalFrame));
+          controller.enqueue(encoder.encode(errorFrame));
+          controller.close();
+        },
+      }),
+      { status: 200, headers: { "content-type": "text/event-stream" } },
+    );
+
+    const text = await readStreamText(wrapQoderApiSSE(upstream, "qoder-api/ultimate"));
+
+    expect(text).toContain("Hello");
+    expect(text).toContain("Model not enabled for this account");
+    expect(text).toContain("qmodel_latest");
+    expect(text).toMatch(/data: \[DONE\]/);
+  });
+});

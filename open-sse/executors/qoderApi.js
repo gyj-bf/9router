@@ -349,6 +349,29 @@ function parseQueueError(innerBody) {
   return null;
 }
 
+function parseModelNotEnabledError(innerBody) {
+  if (!innerBody) return null;
+  try {
+    const parsed = JSON.parse(innerBody);
+    const message = (parsed.message || parsed.error?.message || "").toLowerCase();
+    const code = (parsed.code || parsed.error?.code || "").toLowerCase();
+
+    const isModelNotEnabled =
+      code === "model_not_enabled" ||
+      message.includes("not enabled") ||
+      message.includes("not available for") ||
+      message.includes("upgrade");
+
+    if (!isModelNotEnabled) return null;
+
+    return {
+      code: code || "model_not_enabled",
+      message: parsed.message || parsed.error?.message || "Model not enabled for this account",
+    };
+  } catch {}
+  return null;
+}
+
 export function wrapQoderApiSSE(response, model = "qoder-api/lite") {
   if (!response?.ok || !response.body) return response;
 
@@ -380,6 +403,22 @@ export function wrapQoderApiSSE(response, model = "qoder-api/lite") {
       const statusValue = typeof envelope.statusCodeValue === "number" ? envelope.statusCodeValue : 200;
       const inner = typeof envelope.body === "string" ? envelope.body : "";
       if (statusValue !== 200) {
+        if (statusValue === 403) {
+          const modelError = parseModelNotEnabledError(inner);
+          if (modelError) {
+            logger.error(LOG_TAG, "Model not enabled in stream", { statusValue, body: inner.slice(0, 200) });
+            const errChunk = JSON.stringify({
+              id: `qoder-api-error-${Date.now()}`,
+              object: "chat.completion.chunk",
+              created: Math.floor(Date.now() / 1000),
+              model,
+              choices: [{ index: 0, delta: { content: `\n[Model not enabled for this account. Try "qmodel_latest" or upgrade at https://qoder.com/pricing]` }, finish_reason: "stop" }],
+            });
+            controller.enqueue(encoder.encode(`data: ${errChunk}\n\n`));
+            emitDone(controller);
+            return;
+          }
+        }
         const queueInfo = parseQueueError(inner);
         if (queueInfo) {
           logger.error(LOG_TAG, "Upstream queue error in stream", {
@@ -536,13 +575,26 @@ async function peekFirstFrame(response, signal) {
         const statusValue = typeof envelope.statusCodeValue === "number" ? envelope.statusCodeValue : 200;
         if (statusValue !== 200) {
           const inner = typeof envelope.body === "string" ? envelope.body : "";
+
+          // Check model-not-enabled first (403 specific)
+          if (statusValue === 403) {
+            const modelError = parseModelNotEnabledError(inner);
+            if (modelError) {
+              reader.cancel().catch(() => {});
+              return { isModelNotEnabled: true, modelError, peekedBytes: null, remainingStream: null };
+            }
+          }
+
+          // Then check queue error
           const queueInfo = parseQueueError(inner);
           if (queueInfo) {
             reader.cancel().catch(() => {});
-            return { isQueueError: true, queueInfo, firstFrameData: peekedBytes, remainingStream: null };
+            return { isQueueError: true, queueInfo, peekedBytes: null, remainingStream: null };
           }
+
+          // Other upstream error
           reader.cancel().catch(() => {});
-          return { isQueueError: false, upstreamStatus: statusValue, upstreamBody: inner, firstFrameData: peekedBytes, remainingStream: null };
+          return { isQueueError: false, upstreamStatus: statusValue, upstreamBody: inner, peekedBytes: null, remainingStream: null };
         }
       } catch {}
     }
@@ -857,6 +909,28 @@ export class QoderApiExecutor {
 
     if (peek.bufferOverflow) {
       logger.warn(LOG_TAG, "Peek buffer exceeded cap, error detection skipped", { requestId });
+    }
+
+    if (peek.isModelNotEnabled) {
+      const err = peek.modelError;
+      logger.error(LOG_TAG, "Model not enabled for this account", {
+        requestId,
+        modelKey,
+        code: err.code,
+        upstreamMessage: err.message,
+      });
+      const upstreamDetail = err.message && err.message !== "Model not enabled for this account"
+        ? ` Upstream: ${err.message}`
+        : "";
+      return {
+        response: errorResponse(
+          `Model "${modelKey}" is not enabled for this account. Try "qmodel_latest" or upgrade your plan at https://qoder.com/pricing.${upstreamDetail}`,
+          "model_not_enabled", "model_not_enabled", 403
+        ),
+        url: chatUrl,
+        headers,
+        transformedBody,
+      };
     }
 
     if (peek.isQueueError) {

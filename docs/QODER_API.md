@@ -695,6 +695,7 @@ Before returning the streaming response to the client, 9Router reads the **first
 1. Read the first chunk from the upstream SSE stream (max 10s timeout, 64KB buffer cap)
 2. Parse the first SSE `data:` line
 3. If `statusCodeValue !== 200`:
+   - **Model-not-enabled** (403 with plan restriction patterns) → return HTTP 403 → triggers account fallback with descriptive error
    - **Queue error** (`isQueued: true` or `serviceAvailable: false`) → return HTTP 503 → triggers account fallback + exponential backoff
    - **Other upstream error** → return HTTP 502 → triggers account fallback + 30s lock
 4. If normal (`statusCodeValue === 200`):
@@ -797,6 +798,7 @@ The error is emitted as a content chunk to the client: `\n[Upstream provider err
 | 401 | `authentication_error` | `invalid_api_key` | Missing/invalid API key or session exchange failed | ❌ No |
 | 401 | `authentication_error` | `auth_failed` | COSY header building failed | ❌ No |
 | 400 | `invalid_request_error` | `invalid_request` | Payload building failed | ❌ No |
+| 403 | `model_not_enabled` | `model_not_enabled` | Model not enabled for this account (detected from upstream 403 response) | ❌ No |
 | 499 | `client_error` | `aborted` | Client disconnected before/during request | ❌ No |
 | 500 | `server_error` | `encoding_failed` | Body encoding failed | ❌ No |
 | 502 | `upstream_error` | `upstream_error` | Qoder API returned 5xx (after 3 retries exhausted) | ✅ Yes (3×) |
@@ -1115,9 +1117,10 @@ Client Request
 │       │ 200 OK                               │          │
 │       ▼                                      │          │
 │  ┌──────────────┐                            │          │
-│  │ peekFirstFrame│  Queue error? → 503       │          │
-│  │  (10s max)   │  Upstream err? → 502       │          │
-│  │              │  Normal? → pass through     │          │
+│  │ peekFirstFrame│  Model not enabled? → 403  │          │
+│  │  (10s max)   │  Queue error? → 503        │          │
+│  │              │  Upstream err? → 502        │          │
+│  │              │  Normal? → pass through      │          │
 │  └──────────────┘                            │          │
 └─────────────────────────────────────────────────────────┘
     ↓ error (502/503)
@@ -1181,6 +1184,11 @@ The client's abort signal is passed through to the upstream fetch via `AbortSign
 ### Pre-flight Error Detection (`peekFirstFrame`)
 
 After a successful HTTP 200 response, the executor reads the first SSE frame before returning the stream to the client. This catches errors that arrive inside the stream body:
+
+**Model-not-enabled errors** (403 with plan restriction):
+- Detected by parsing 403 response body for `model_not_enabled` code, "not enabled", "not available for", or "upgrade" patterns
+- Returns HTTP 403 with `code: "model_not_enabled"` and a helpful message suggesting `qmodel_latest` or plan upgrade
+- Reactive approach: no pre-flight catalog fetch needed — error is caught from the upstream response itself
 
 **Queue errors** (model overloaded):
 - Detected by parsing nested JSON (up to 3 levels deep)
