@@ -62,3 +62,55 @@ MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDA8iMH5c02LilrsERw9t6Pv5Nc
 6HRkPJ7S236FZz73In/KVuLnwI8JJ2CbuJap8kvheCCZpmAWpb/cPx/3Vr/J6I17
 XcW+ML9FoCI6AOvOzwIDAQAB
 -----END PUBLIC KEY-----`;
+
+// ─── Qoder API (gyj-bf features) ────────────────────────────────────────────
+
+export const QODER_DEFAULTS = Object.freeze({
+  region: "sg",
+  cosyVersion: "2.11.2",
+  mitmBypassQoder: false,
+  mitmBypassExtraHosts: "",
+});
+
+// Regional inference hosts — override via QODER_API_REGION env var (us, sg, jp).
+export const QODER_REGION_HOSTS = {
+  us: "https://api1.qoder.sh",
+  sg: "https://api2.qoder.sh",
+  jp: "https://api3.qoder.sh",
+};
+
+export function getQoderRegion() {
+  const raw = (process.env.QODER_API_REGION || QODER_DEFAULTS.region).toLowerCase().trim();
+  return QODER_REGION_HOSTS[raw] ? raw : QODER_DEFAULTS.region;
+}
+
+export function getQoderChatBase() {
+  return QODER_REGION_HOSTS[getQoderRegion()];
+}
+
+export function getQoderChatUrl() {
+  return `${getQoderChatBase()}/algo${QODER_CHAT_SIG_PATH}?FetchKeys=llm_model_result&AgentId=agent_common&Encode=1`;
+}
+
+export function getQoderActivityUrl() {
+  return `${getQoderChatBase()}/algo/api/v2/activity`;
+}
+
+export function getQoderModelListUrl() {
+  return `${getQoderChatBase()}/algo/api/v2/model/list`;
+}
+
+export function getQoderCosyVersion() {
+  return process.env.QODER_COSY_VERSION || QODER_DEFAULTS.cosyVersion;
+}
+
+export const DEFAULT_MAX_OUTPUT_TOKENS = 32768;
+
+export const DEFAULT_TEMPERATURE = 0.1;
+
+export const QODER_MACHINE_OS_OPTIONS = [
+  "x86_64_windows",
+  "x86_64_linux",
+  "aarch64_macos",
+  "x86_64_macos",
+];
