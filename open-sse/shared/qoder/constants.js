@@ -109,10 +109,12 @@ export const DEFAULT_MAX_OUTPUT_TOKENS = 32768;
 export const DEFAULT_TEMPERATURE = 0.1;
 
 export const QODER_MACHINE_OS_OPTIONS = [
-  "x86_64_windows",
+  "x86_64_darwin",
+  "arm64_darwin",
   "x86_64_linux",
-  "aarch64_macos",
-  "x86_64_macos",
+  "arm64_linux",
+  "x86_64_windows",
+  "arm64_windows",
 ];
 
 export const QODER_ACTIVITY_URL = `${QODER_CENTER_BASE}/algo/api/v2/activity`;

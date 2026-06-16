@@ -24,6 +24,7 @@ import {
   QODER_MACHINE_OS,
   QODER_MACHINE_TYPE,
   QODER_RSA_PUBLIC_KEY,
+  getQoderCosyVersion,
 } from "./constants.js";
 
 // AES-128 wants a 16-byte key. Match qodercli/Veria: take the first 16 chars
@@ -148,6 +149,8 @@ export function buildCosyHeaders(body, requestUrl, creds) {
   const sig = md5Hex(Buffer.from(sigInput, "latin1"));
 
   const machineId = creds.machineId || generateMachineId();
+  const cosyVersion = creds.cosyVersion || getQoderCosyVersion();
+  const machineOs = creds.machineOs || QODER_MACHINE_OS;
   const bodyHash = md5Hex(bodyBuf);
   const bodyLength = String(bodyBuf.length);
 
@@ -156,11 +159,11 @@ export function buildCosyHeaders(body, requestUrl, creds) {
     "Cosy-Key": cosyKey,
     "Cosy-User": creds.userId,
     "Cosy-Date": timestamp,
-    "Cosy-Version": QODER_IDE_VERSION,
+    "Cosy-Version": cosyVersion,
     "Cosy-Machineid": machineId,
-    "Cosy-Machinetoken": machineId,
-    "Cosy-Machinetype": QODER_MACHINE_TYPE,
-    "Cosy-Machineos": QODER_MACHINE_OS,
+    "Cosy-Machinetoken": creds.machineToken || machineId,
+    "Cosy-Machinetype": creds.machineType || QODER_MACHINE_TYPE,
+    "Cosy-Machineos": machineOs,
     "Cosy-Clienttype": QODER_CLIENT_TYPE,
     "Cosy-Clientip": "127.0.0.1",
     "Cosy-Bodyhash": bodyHash,
