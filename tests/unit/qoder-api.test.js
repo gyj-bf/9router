@@ -2039,29 +2039,37 @@ describe("qoder-api error handling and logging", () => {
       expect(errorBody.error.message).toBe("Upstream provider returned 500");
     });
 
-    it("returns 503 when network request fails", async () => {
+    it("returns 502 when all network retries are exhausted", async () => {
       proxyAwareFetch
         .mockResolvedValueOnce(new Response(JSON.stringify({
           id: "user-123",
           securityOauthToken: "token-123",
           expireTime: Date.now() + 60_000,
         }), { status: 200, headers: { "content-type": "application/json" } }))
+        .mockRejectedValueOnce(new Error("Network error"))
+        .mockRejectedValueOnce(new Error("Network error"))
+        .mockRejectedValueOnce(new Error("Network error"))
         .mockRejectedValueOnce(new Error("Network error"));
 
       const executor = new QoderApiExecutor();
       const credentials = { apiKey: "test-key", providerSpecificData: {} };
 
-      const result = await executor.execute({
+      const resultPromise = executor.execute({
         model: "qoder-api/lite",
         body: { messages: [{ role: "user", content: "test" }] },
         credentials,
         provider: "qoder-api",
       });
 
-      expect(result.response.status).toBe(503);
+      await vi.advanceTimersByTimeAsync(1_000);
+      await vi.advanceTimersByTimeAsync(2_000);
+      await vi.advanceTimersByTimeAsync(4_000);
+
+      const result = await resultPromise;
+
+      expect(result.response.status).toBe(502);
       const errorBody = await result.response.json();
-      expect(errorBody.error.type).toBe("server_error");
-      expect(errorBody.error.message).toBe("Upstream service unavailable");
+      expect(errorBody.error.type).toBe("upstream_error");
     });
 
     it("returns 401 when COSY header building fails", async () => {
@@ -2202,7 +2210,7 @@ describe("qoder-api error handling and logging", () => {
       errorSpy.mockRestore();
     });
 
-    it("returns 503 when network request fails", async () => {
+    it("returns 502 when all network retries are exhausted", async () => {
       const logger = await import("../../src/sse/utils/logger.js");
       const errorSpy = vi.spyOn(logger, "error");
 
@@ -2212,23 +2220,30 @@ describe("qoder-api error handling and logging", () => {
           securityOauthToken: "token-123",
           expireTime: Date.now() + 60_000,
         }), { status: 200, headers: { "content-type": "application/json" } }))
+        .mockRejectedValueOnce(new Error("Network error"))
+        .mockRejectedValueOnce(new Error("Network error"))
+        .mockRejectedValueOnce(new Error("Network error"))
         .mockRejectedValueOnce(new Error("Network error"));
 
       const executor = new QoderApiExecutor();
       const credentials = { apiKey: "test-key", providerSpecificData: {} };
 
-      const result = await executor.execute({
+      const resultPromise = executor.execute({
         model: "qoder-api/lite",
         body: { messages: [{ role: "user", content: "test" }] },
         credentials,
         provider: "qoder-api",
       });
 
-      expect(result.response.status).toBe(503);
+      await vi.advanceTimersByTimeAsync(1_000);
+      await vi.advanceTimersByTimeAsync(2_000);
+      await vi.advanceTimersByTimeAsync(4_000);
+
+      const result = await resultPromise;
+
+      expect(result.response.status).toBe(502);
       const errorBody = await result.response.json();
-      expect(errorBody.error.message).toBe("Upstream service unavailable");
-      expect(errorBody.error.type).toBe("server_error");
-      expect(errorBody.error.code).toBe("network_error");
+      expect(errorBody.error.type).toBe("upstream_error");
 
       expect(errorSpy).toHaveBeenCalledWith(
         "Qoder API",

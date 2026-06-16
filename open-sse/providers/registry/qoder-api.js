@@ -23,7 +23,7 @@ export default {
     authType: "api_key",
     headers: {},
     timeoutMs: 120000,
-    stallTimeoutMs: 120000,
+    stallTimeoutMs: 90000,
   },
   models: [
     { id: "auto", name: "Auto-select by Qoder" },

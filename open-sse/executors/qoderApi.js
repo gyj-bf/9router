@@ -8,6 +8,9 @@ import {
   getQoderCosyVersion,
   DEFAULT_MAX_OUTPUT_TOKENS,
   DEFAULT_TEMPERATURE,
+  QODER_MAX_RETRIES,
+  QODER_RETRYABLE_STATUSES,
+  QODER_CONNECT_TIMEOUT_MS,
 } from "../../src/lib/qoder/constants.js";
 import { qoderEncodeBody } from "../../src/lib/qoder/encoding.js";
 import { buildCosyHeaders } from "../../src/lib/qoder/cosy.js";
@@ -307,6 +310,43 @@ export function buildQoderApiPayload(body, { modelKey, modelConfig, userId, user
   return payload;
 }
 
+function parseQueueError(innerBody) {
+  if (!innerBody) return null;
+  try {
+    const outer = JSON.parse(innerBody);
+    const message = outer.message || outer.body || "";
+    if (typeof message !== "string") return null;
+    const parsed = JSON.parse(message);
+    const innerMsg = parsed.message || parsed.body || "";
+    if (typeof innerMsg === "string") {
+      try {
+        const queueData = JSON.parse(innerMsg);
+        if (queueData.isQueued === true || queueData.serviceAvailable === false) {
+          return {
+            code: queueData.code || outer.code || parsed.code,
+            modelKey: queueData.modelKey,
+            queueCount: queueData.queueCount || 0,
+            queueType: queueData.queueType || "unknown",
+            serviceAvailable: queueData.serviceAvailable,
+            waitTime: queueData.waitTime || 0,
+          };
+        }
+      } catch {}
+    }
+    if (parsed.isQueued === true || parsed.serviceAvailable === false) {
+      return {
+        code: parsed.code || outer.code,
+        modelKey: parsed.modelKey,
+        queueCount: parsed.queueCount || 0,
+        queueType: parsed.queueType || "unknown",
+        serviceAvailable: parsed.serviceAvailable,
+        waitTime: parsed.waitTime || 0,
+      };
+    }
+  } catch {}
+  return null;
+}
+
 export function wrapQoderApiSSE(response, model = "qoder-api/lite") {
   if (!response?.ok || !response.body) return response;
 
@@ -338,15 +378,38 @@ export function wrapQoderApiSSE(response, model = "qoder-api/lite") {
       const statusValue = typeof envelope.statusCodeValue === "number" ? envelope.statusCodeValue : 200;
       const inner = typeof envelope.body === "string" ? envelope.body : "";
       if (statusValue !== 200) {
-        logger.error(LOG_TAG, "Upstream error in stream", { statusValue, body: inner });
-        const errChunk = JSON.stringify({
-          id: `qoder-api-error-${Date.now()}`,
-          object: "chat.completion.chunk",
-          created: Math.floor(Date.now() / 1000),
-          model,
-          choices: [{ index: 0, delta: { content: `\n[Upstream provider error (code ${statusValue})]` }, finish_reason: "stop" }],
-        });
-        controller.enqueue(encoder.encode(`data: ${errChunk}\n\n`));
+        const queueInfo = parseQueueError(inner);
+        if (queueInfo) {
+          logger.error(LOG_TAG, "Upstream queue error in stream", {
+            statusValue,
+            code: queueInfo.code,
+            queueCount: queueInfo.queueCount,
+            queueType: queueInfo.queueType,
+            waitTime: queueInfo.waitTime,
+            serviceAvailable: queueInfo.serviceAvailable,
+          });
+          const waitSec = queueInfo.waitTime || 0;
+          const waitStr = waitSec > 0 ? `~${Math.ceil(waitSec / 60)}min` : "unpredictable";
+          const errMsg = `Model "${queueInfo.modelKey || model}" is queued (${queueInfo.queueType}, ${queueInfo.queueCount} ahead, ${waitStr} wait). Service temporarily unavailable.`;
+          const errChunk = JSON.stringify({
+            id: `qoder-api-error-${Date.now()}`,
+            object: "chat.completion.chunk",
+            created: Math.floor(Date.now() / 1000),
+            model,
+            choices: [{ index: 0, delta: { content: `\n[Queue: ${errMsg}]` }, finish_reason: "stop" }],
+          });
+          controller.enqueue(encoder.encode(`data: ${errChunk}\n\n`));
+        } else {
+          logger.error(LOG_TAG, "Upstream error in stream", { statusValue, body: inner });
+          const errChunk = JSON.stringify({
+            id: `qoder-api-error-${Date.now()}`,
+            object: "chat.completion.chunk",
+            created: Math.floor(Date.now() / 1000),
+            model,
+            choices: [{ index: 0, delta: { content: `\n[Upstream provider error (code ${statusValue})]` }, finish_reason: "stop" }],
+          });
+          controller.enqueue(encoder.encode(`data: ${errChunk}\n\n`));
+        }
         emitDone(controller);
         return;
       }
@@ -401,6 +464,103 @@ export function wrapQoderApiSSE(response, model = "qoder-api/lite") {
   });
 }
 
+const PEEK_TIMEOUT_MS = 10_000;
+const PEEK_BUFFER_CAP = 65_536;
+
+async function peekFirstFrame(response) {
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let firstFrameData = null;
+  let firstFrameRaw = null;
+
+  const emptyStream = () => new ReadableStream({ start(c) { c.close(); } });
+
+  try {
+    const peekDeadline = Date.now() + PEEK_TIMEOUT_MS;
+
+    while (true) {
+      const remaining = peekDeadline - Date.now();
+      if (remaining <= 0) {
+        break;
+      }
+
+      const timeoutPromise = new Promise((_, reject) =>
+        setTimeout(() => reject(new Error("peek timeout")), Math.min(remaining, PEEK_TIMEOUT_MS))
+      );
+
+      let chunk;
+      try {
+        chunk = await Promise.race([reader.read(), timeoutPromise]);
+      } catch {
+        break;
+      }
+
+      if (chunk.done) break;
+      buffer += decoder.decode(chunk.value, { stream: true });
+
+      if (buffer.length > PEEK_BUFFER_CAP) break;
+
+      const nlIndex = buffer.indexOf("\n");
+      if (nlIndex !== -1) {
+        firstFrameRaw = buffer.slice(0, nlIndex);
+        firstFrameData = new TextEncoder().encode(buffer);
+        break;
+      }
+    }
+  } catch (e) {
+    reader.cancel().catch(() => {});
+    return { isQueueError: false, peekError: e, remainingStream: emptyStream() };
+  }
+
+  if (!firstFrameData) {
+    reader.cancel().catch(() => {});
+    return { isQueueError: false, firstFrameData: null, remainingStream: emptyStream() };
+  }
+
+  const trimmed = firstFrameRaw.replace(/\r$/, "").trim();
+  if (trimmed.startsWith("data:")) {
+    const jsonStr = trimmed.slice(5).trimStart();
+    if (jsonStr && jsonStr !== "[DONE]") {
+      try {
+        const envelope = JSON.parse(jsonStr);
+        const statusValue = typeof envelope.statusCodeValue === "number" ? envelope.statusCodeValue : 200;
+        if (statusValue !== 200) {
+          const inner = typeof envelope.body === "string" ? envelope.body : "";
+          const queueInfo = parseQueueError(inner);
+          if (queueInfo) {
+            reader.cancel().catch(() => {});
+            return { isQueueError: true, queueInfo, firstFrameData, remainingStream: null };
+          }
+          reader.cancel().catch(() => {});
+          return { isQueueError: false, upstreamStatus: statusValue, upstreamBody: inner, firstFrameData, remainingStream: null };
+        }
+      } catch {}
+    }
+  }
+
+  const remainingStream = new ReadableStream({
+    start(controller) {
+      controller.enqueue(firstFrameData);
+      return (async () => {
+        try {
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            controller.enqueue(value);
+          }
+        } catch (e) {
+          controller.error(e);
+          return;
+        }
+        controller.close();
+      })();
+    },
+  });
+
+  return { isQueueError: false, firstFrameData, remainingStream };
+}
+
 export class QoderApiExecutor {
   static normalizeModelKey(model) {
     return String(model || "lite").replace(/^qoder-api\//, "").replace(/^qda\//, "") || "lite";
@@ -450,7 +610,7 @@ export class QoderApiExecutor {
     }
   }
 
-  async execute({ model, body, credentials, provider, onCredentialsRefreshed, proxyOptions = null }) {
+  async execute({ model, body, credentials, signal, provider, onCredentialsRefreshed, proxyOptions = null }) {
     const requestId = crypto.randomUUID();
     const chatUrl = getQoderChatUrl();
 
@@ -552,45 +712,126 @@ export class QoderApiExecutor {
       ...cosyHeaders,
     };
 
+    // Retry transient upstream errors (502, 503, 504) up to 3 times.
+    // Backoff: 1s → 2s → 4s. Non-retryable errors (400, 401, 403) return immediately.
+    const MAX_RETRIES = QODER_MAX_RETRIES;
+    const RETRYABLE_STATUSES = QODER_RETRYABLE_STATUSES;
     let response;
-    try {
-      response = await proxyAwareFetch(chatUrl, {
-        method: "POST",
-        headers,
-        body: encodedBodyBuffer,
-      }, proxyOptions);
-    } catch (error) {
-      logger.error(LOG_TAG, "Network request failed", {
-        requestId,
-        error: error.message,
-      });
-      return {
-        response: errorResponse("Upstream service unavailable",
-          "server_error", "network_error", 503),
-        url: chatUrl,
-        headers,
-        transformedBody,
-      };
+    let lastError = null;
+
+    for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+      if (attempt > 0) {
+        const backoffMs = Math.pow(2, attempt - 1) * 1000;
+        logger.info(LOG_TAG, `Retry ${attempt}/${MAX_RETRIES} in ${backoffMs}ms`, {
+          requestId,
+          modelKey,
+          lastStatus: lastError?.status,
+        });
+        await new Promise(resolve => setTimeout(resolve, backoffMs));
+        if (signal?.aborted) {
+          logger.warn(LOG_TAG, "Client disconnected before retry", { requestId });
+          return {
+            response: errorResponse("Request aborted", "client_error", "aborted", 499),
+            url: chatUrl,
+            headers,
+            transformedBody,
+          };
+        }
+      }
+
+      // Build abort signal: combine client disconnect + connect timeout
+      const connectCtrl = new AbortController();
+      const connectTimer = setTimeout(() => connectCtrl.abort(new Error("fetch connect timeout")), QODER_CONNECT_TIMEOUT_MS);
+      const mergedSignal = signal
+        ? AbortSignal.any([signal, connectCtrl.signal])
+        : connectCtrl.signal;
+
+      try {
+        response = await proxyAwareFetch(chatUrl, {
+          method: "POST",
+          headers,
+          body: encodedBodyBuffer,
+          signal: mergedSignal,
+        }, proxyOptions);
+      } catch (error) {
+        clearTimeout(connectTimer);
+        if (signal?.aborted) {
+          logger.warn(LOG_TAG, "Request aborted by client", { requestId, error: error.message });
+          return {
+            response: errorResponse("Request aborted", "client_error", "aborted", 499),
+            url: chatUrl,
+            headers,
+            transformedBody,
+          };
+        }
+        lastError = { status: 503, message: error.message };
+        logger.error(LOG_TAG, "Network request failed", {
+          requestId,
+          attempt,
+          error: error.message,
+        });
+        continue;
+      }
+
+      clearTimeout(connectTimer);
+
+      if (!response.ok) {
+        // Retryable status — try again
+        if (RETRYABLE_STATUSES.has(response.status) && attempt < MAX_RETRIES) {
+          lastError = { status: response.status, message: response.statusText };
+          logger.warn(LOG_TAG, `Upstream returned ${response.status}, will retry`, {
+            requestId,
+            attempt,
+            status: response.status,
+            statusText: response.statusText,
+          });
+          // Consume the error body before retrying
+          try { await response.text(); } catch {}
+          continue;
+        }
+
+        // Non-retryable error or retries exhausted
+        let errorBody = "";
+        try {
+          errorBody = (await response.text()).slice(0, 500);
+        } catch {}
+
+        logger.error(LOG_TAG, "Upstream error response", {
+          requestId,
+          status: response.status,
+          statusText: response.statusText,
+          body: errorBody,
+          attempts: attempt + 1,
+        });
+
+        return {
+          response: errorResponse(
+            `Upstream provider returned ${response.status}`,
+            "upstream_error", "upstream_error",
+            response.status >= 500 ? 502 : response.status),
+          url: chatUrl,
+          headers,
+          transformedBody,
+        };
+      }
+
+      // Success — break out of retry loop
+      break;
     }
 
-    if (!response.ok) {
-      let errorBody = "";
-      try {
-        errorBody = (await response.text()).slice(0, 500);
-      } catch {}
-      
-      logger.error(LOG_TAG, "Upstream error response", {
+    // If all retries exhausted without success
+    if (!response || !response.ok) {
+      const status = lastError?.status || 503;
+      logger.error(LOG_TAG, "All retry attempts exhausted", {
         requestId,
-        status: response.status,
-        statusText: response.statusText,
-        body: errorBody,
+        modelKey,
+        lastStatus: status,
+        attempts: MAX_RETRIES + 1,
       });
-      
       return {
         response: errorResponse(
-          `Upstream provider returned ${response.status}`,
-          "upstream_error", "upstream_error",
-          response.status >= 500 ? 502 : response.status),
+          `Upstream provider unavailable after ${MAX_RETRIES + 1} attempts (${status})`,
+          "upstream_error", "upstream_unavailable", 502),
         url: chatUrl,
         headers,
         transformedBody,
@@ -603,8 +844,60 @@ export class QoderApiExecutor {
       status: response.status,
     });
 
+    const peek = await peekFirstFrame(response);
+
+    if (peek.isQueueError) {
+      const q = peek.queueInfo;
+      const waitSec = q.waitTime || 0;
+      const waitStr = waitSec > 0 ? `~${Math.ceil(waitSec / 60)}min` : "unpredictable";
+      logger.error(LOG_TAG, "Queue error detected in first frame, triggering fallback", {
+        requestId,
+        modelKey: q.modelKey,
+        queueCount: q.queueCount,
+        queueType: q.queueType,
+        waitTime: waitStr,
+      });
+      return {
+        response: errorResponse(
+          `Model "${q.modelKey || modelKey}" queued (${q.queueType}, ${q.queueCount} ahead, ${waitStr} wait). Service unavailable.`,
+          "upstream_error", "service_unavailable", 503),
+        url: chatUrl,
+        headers,
+        transformedBody,
+      };
+    }
+
+    if (peek.upstreamStatus && peek.upstreamStatus !== 200) {
+      logger.error(LOG_TAG, "Upstream error in first frame, triggering fallback", {
+        requestId,
+        statusValue: peek.upstreamStatus,
+        body: (peek.upstreamBody || "").slice(0, 200),
+      });
+      return {
+        response: errorResponse(
+          `Upstream provider error (code ${peek.upstreamStatus})`,
+          "upstream_error", "upstream_error", 502),
+        url: chatUrl,
+        headers,
+        transformedBody,
+      };
+    }
+
+    if (peek.peekError) {
+      logger.error(LOG_TAG, "Peek failed, passing through without error detection", {
+        requestId,
+        error: peek.peekError.message,
+      });
+    }
+
+    const reconstructedResponse = new Response(peek.remainingStream, {
+      status: response.status,
+      statusText: response.statusText,
+      headers: response.headers,
+    });
+
     return {
-      response: wrapQoderApiSSE(response, `${provider || "qoder-api"}/${modelKey}`),
+      response: wrapQoderApiSSE(reconstructedResponse, `${provider || "qoder-api"}/${modelKey}`),
       url: chatUrl,
       headers,
       transformedBody,

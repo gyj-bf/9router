@@ -669,7 +669,7 @@ Returns `false` if:
 
 ## 8. SSE Unwrapping
 
-Qoder API returns SSE streams in a custom envelope format. 9Router unwraps this into standard OpenAI SSE format.
+Qoder API returns SSE streams in a custom envelope format. 9Router unwraps this into standard OpenAI SSE format, with a pre-flight check to detect errors before committing to the stream.
 
 ### Qoder Envelope Format
 
@@ -684,6 +684,64 @@ data: [DONE]
 Each SSE frame contains:
 - `statusCodeValue`: HTTP status (200 = success)
 - `body`: JSON string with OpenAI-compatible payload
+
+### Pre-flight Check: `peekFirstFrame()`
+
+Before returning the streaming response to the client, 9Router reads the **first SSE frame** to detect errors early. This enables the account fallback system to trigger before the client receives any data.
+
+**Why this matters:** Qoder API can return HTTP 200 OK but embed errors inside the SSE stream (e.g., queue errors with `statusCodeValue: 403`). Without pre-flight checking, the fallback system would see HTTP 200 as success and never try another account.
+
+**How it works:**
+1. Read the first chunk from the upstream SSE stream (max 10s timeout, 64KB buffer cap)
+2. Parse the first SSE `data:` line
+3. If `statusCodeValue !== 200`:
+   - **Queue error** (`isQueued: true` or `serviceAvailable: false`) → return HTTP 503 → triggers account fallback + exponential backoff
+   - **Other upstream error** → return HTTP 502 → triggers account fallback + 30s lock
+4. If normal (`statusCodeValue === 200`):
+   - Prepend the first chunk back to the remaining stream
+   - Pass to `wrapQoderApiSSE()` for normal unwrapping
+
+**Safety guards:**
+- **10s peek timeout**: If the first frame doesn't arrive within 10 seconds, skip error detection and pass through
+- **64KB buffer cap**: Prevents unbounded memory growth from pathological responses
+- **Reader cleanup**: Upstream TCP connection is properly closed on all error paths (no socket leaks)
+
+### Queue Error Detection
+
+Qoder API returns queue errors when a model is overloaded. The error is deeply nested JSON (up to 3 levels):
+
+```json
+{
+  "statusCodeValue": 403,
+  "body": "{\"code\":\"403\",\"message\":\"{\\\"code\\\":\\\"10605\\\",\\\"message\\\":\\\"{\\\\\\\"isQueued\\\\\\\":true,\\\\\\\"queueCount\\\\\\\":56,\\\\\\\"queueType\\\\\\\":\\\\\\\"slow\\\\\\\",\\\\\\\"serviceAvailable\\\\\\\":false,\\\\\\\"waitTime\\\\\\\":18254}\\\"}\"}"
+}
+```
+
+`parseQueueError()` parses up to 3 levels of nesting and extracts:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `isQueued` | boolean | Whether the request is queued |
+| `serviceAvailable` | boolean | Whether the service is available |
+| `modelKey` | string | Model identifier (e.g., `qmodel_latest`) |
+| `queueCount` | number | Number of requests ahead in queue |
+| `queueType` | string | Queue type (`slow`, `priority`, etc.) |
+| `waitTime` | number | Estimated wait time in seconds |
+
+When detected, 9Router returns HTTP 503 with a descriptive message:
+```json
+{
+  "error": {
+    "message": "Model \"qmodel_latest\" queued (slow, 56 ahead, ~305min wait). Service unavailable.",
+    "type": "upstream_error",
+    "code": "service_unavailable"
+  }
+}
+```
+
+If `waitTime` is 0 or missing, the message shows `"unpredictable wait"` instead.
+
+This 503 response triggers the full fallback chain: account lock → try next account → combo fallback to different model.
 
 ### Unwrapped Format (OpenAI-compatible)
 
@@ -707,16 +765,18 @@ data: [DONE]
 
 ### Error Handling in Stream
 
-If `statusCodeValue !== 200`:
+If `statusCodeValue !== 200` (and not caught by `peekFirstFrame`):
 ```json
 {"statusCodeValue": 500, "body": "{\"error\":\"upstream failure\"}"}
 ```
 
 Logged as: `[Qoder API] Upstream error in stream { statusValue: 500, body: "..." }`
 
+The error is emitted as a content chunk to the client: `\n[Upstream provider error (code 500)]` followed by `[DONE]`.
+
 ## 9. Error Handling
 
-9Router returns OpenAI-compatible error responses with appropriate HTTP status codes.
+9Router returns OpenAI-compatible error responses with appropriate HTTP status codes. Transient errors (502, 503, 504) are automatically retried before returning an error to the client (see section 14).
 
 ### Error Response Format
 
@@ -732,14 +792,18 @@ Logged as: `[Qoder API] Upstream error in stream { statusValue: 500, body: "..."
 
 ### Error Types
 
-| HTTP Status | Error Type | Code | Description |
-|-------------|------------|------|-------------|
-| 401 | `authentication_error` | `invalid_api_key` | Missing/invalid API key or session exchange failed |
-| 401 | `authentication_error` | `auth_failed` | COSY header building failed |
-| 500 | `server_error` | `invalid_request` | Payload building failed |
-| 500 | `server_error` | `internal_error` | Body encoding failed |
-| 502 | `upstream_error` | `upstream_5xx` | Qoder API returned 5xx status |
-| 503 | `server_error` | `network_error` | Network request failed (DNS, timeout, connection refused) |
+| HTTP Status | Error Type | Code | Description | Retried? |
+|-------------|------------|------|-------------|----------|
+| 401 | `authentication_error` | `invalid_api_key` | Missing/invalid API key or session exchange failed | ❌ No |
+| 401 | `authentication_error` | `auth_failed` | COSY header building failed | ❌ No |
+| 400 | `invalid_request_error` | `invalid_request` | Payload building failed | ❌ No |
+| 499 | `client_error` | `aborted` | Client disconnected before/during request | ❌ No |
+| 500 | `server_error` | `encoding_failed` | Body encoding failed | ❌ No |
+| 502 | `upstream_error` | `upstream_error` | Qoder API returned 5xx (after 3 retries exhausted) | ✅ Yes (3×) |
+| 502 | `upstream_error` | `upstream_unavailable` | All retry attempts exhausted | ✅ Yes (3×) |
+| 502 | `upstream_error` | `upstream_error` | Non-queue upstream error detected in first SSE frame | ❌ No (peek) |
+| 503 | `upstream_error` | `service_unavailable` | Queue error detected in first SSE frame (model overloaded) | ❌ No (peek) |
+| 503 | `server_error` | `network_error` | Network request failed after retries (DNS, timeout, connection refused) | ✅ Yes (3×) |
 
 ### Error Logging
 
@@ -748,8 +812,22 @@ All errors are logged with `[Qoder API]` tag:
 - `error`: Error message (no stack traces)
 - `status`: HTTP status (for upstream errors)
 - `statusText`: HTTP status text
+- `attempts`: Number of retry attempts made (for retried errors)
 
 Error body truncated to 500 characters to prevent log spam.
+
+### Queue Error Logging
+
+Queue errors detected by `peekFirstFrame()` are logged with full queue details:
+```
+[Qoder API] Queue error detected in first frame, triggering fallback {
+  requestId: "...",
+  modelKey: "qmodel_latest",
+  queueCount: 56,
+  queueType: "slow",
+  waitTime: "~305min"
+}
+```
 
 ### Success Logging
 
@@ -872,6 +950,28 @@ DEFAULT_MAX_OUTPUT_TOKENS = 32768  // High for complex coding tasks
 DEFAULT_TEMPERATURE = 0.1          // Low randomness for coding
 ```
 
+### Timeout & Retry Constants
+
+```javascript
+QODER_CONNECT_TIMEOUT_MS = 30_000  // 30s per attempt (upstream must send headers within this)
+QODER_MAX_RETRIES = 3              // Max retry attempts for transient errors (502, 503, 504)
+QODER_RETRYABLE_STATUSES = [502, 503, 504]  // HTTP statuses that trigger retry
+```
+
+**Provider registry timeouts:**
+```javascript
+timeoutMs: 120_000       // Overall fetch timeout
+stallTimeoutMs: 90_000   // Stream stall detection (90s of no data = dead stream)
+```
+
+**Internal constants (not configurable):**
+```javascript
+PEEK_TIMEOUT_MS = 10_000   // Max time to wait for first SSE frame during pre-flight check
+PEEK_BUFFER_CAP = 65_536   // Max buffer size during peek (64KB)
+```
+
+See section 14 for how these constants interact in the retry and resilience system.
+
 ### Vision Models
 
 Vision capability (`is_vl: true`) is auto-detected when images are present in messages. Any model can process images if the request contains `image_url` content.
@@ -979,3 +1079,151 @@ The following OpenAI parameters are **not** passed through to Qoder:
 - `logprobs` — not supported
 
 These parameters are silently ignored if present in the request.
+
+## 14. Retry & Resilience
+
+The qoder-api executor implements a multi-layer resilience system to maximize uptime and minimize failed requests.
+
+### Architecture Overview
+
+```
+Client Request
+    ↓
+┌─────────────────────────────────────────────────────────┐
+│ Layer 1: EXECUTOR RETRY (qoderApi.js)                   │
+│                                                         │
+│  ┌──────────┐   502/503/504   ┌──────────┐             │
+│  │ Attempt 0│────────────────►│ Backoff  │──┐          │
+│  │ (30s max)│                 │   1s     │  │          │
+│  └──────────┘                 └──────────┘  │          │
+│                                              ▼          │
+│  ┌──────────┐   502/503/504   ┌──────────┐             │
+│  │ Attempt 1│────────────────►│ Backoff  │──┐          │
+│  │ (30s max)│                 │   2s     │  │          │
+│  └──────────┘                 └──────────┘  │          │
+│                                              ▼          │
+│  ┌──────────┐   502/503/504   ┌──────────┐             │
+│  │ Attempt 2│────────────────►│ Backoff  │──┐          │
+│  │ (30s max)│                 │   4s     │  │          │
+│  └──────────┘                 └──────────┘  │          │
+│                                              ▼          │
+│  ┌──────────┐   502/503/504                  │          │
+│  │ Attempt 3│────────────────► Return 502    │          │
+│  │ (30s max)│   (all retries exhausted)      │          │
+│  └──────────┘                                │          │
+│       │                                      │          │
+│       │ 200 OK                               │          │
+│       ▼                                      │          │
+│  ┌──────────────┐                            │          │
+│  │ peekFirstFrame│  Queue error? → 503       │          │
+│  │  (10s max)   │  Upstream err? → 502       │          │
+│  │              │  Normal? → pass through     │          │
+│  └──────────────┘                            │          │
+└─────────────────────────────────────────────────────────┘
+    ↓ error (502/503)
+┌─────────────────────────────────────────────────────────┐
+│ Layer 2: ACCOUNT FALLBACK (chat.js + auth.js)           │
+│                                                         │
+│  Account locked (30s or exponential backoff)            │
+│  → Try next account in pool                             │
+│  → Repeat until all accounts exhausted                  │
+└─────────────────────────────────────────────────────────┘
+    ↓ all accounts exhausted
+┌─────────────────────────────────────────────────────────┐
+│ Layer 3: COMBO FALLBACK (combo.js)                      │
+│                                                         │
+│  → Try next model in combo (e.g., glm/glm-5)           │
+│  → Repeat until all combo models exhausted              │
+│  → Return 503 with last error                           │
+└─────────────────────────────────────────────────────────┘
+```
+
+### Retry Logic
+
+**Retryable errors** (retried up to 3 times with exponential backoff):
+- HTTP 502 (Bad Gateway)
+- HTTP 503 (Service Unavailable)
+- HTTP 504 (Gateway Timeout)
+- Network errors (ECONNRESET, ECONNREFUSED, DNS failures)
+
+**Non-retryable errors** (returned immediately):
+- HTTP 400 (Bad Request)
+- HTTP 401 (Unauthorized)
+- HTTP 403 (Forbidden)
+- HTTP 404 (Not Found)
+- HTTP 500 (Internal Server Error)
+- Client abort (499)
+
+### Backoff Schedule
+
+Exponential backoff between retries: `2^(attempt-1) × 1000ms`
+
+| Attempt | Backoff | Cumulative Wait |
+|---------|---------|-----------------|
+| 0 (initial) | 0ms | 0ms |
+| 1 (retry 1) | 1,000ms | 1s |
+| 2 (retry 2) | 2,000ms | 3s |
+| 3 (retry 3) | 4,000ms | 7s |
+
+Total worst-case backoff overhead: **7 seconds**.
+
+### Abort Signal Passthrough
+
+The client's abort signal is passed through to the upstream fetch via `AbortSignal.any()`, combining:
+- **Client disconnect signal**: Fires when the client closes the connection
+- **Connect timeout signal**: Fires after 30s if upstream hasn't sent response headers
+
+**Behavior:**
+- Client disconnect during fetch → returns 499 immediately (no retry)
+- Client disconnect during backoff wait → returns 499 immediately (no retry)
+- Connect timeout → treated as network error → retried
+
+### Pre-flight Error Detection (`peekFirstFrame`)
+
+After a successful HTTP 200 response, the executor reads the first SSE frame before returning the stream to the client. This catches errors that arrive inside the stream body:
+
+**Queue errors** (model overloaded):
+- Detected by parsing nested JSON (up to 3 levels deep)
+- Returns HTTP 503 with `code: "service_unavailable"`
+- Triggers account fallback + exponential backoff in the account layer
+
+**Other upstream errors** (non-queue):
+- Returns HTTP 502 with `code: "upstream_error"`
+- Triggers account fallback + 30s lock
+
+**Safety limits:**
+- 10s maximum peek time (prevents indefinite hangs)
+- 64KB buffer cap (prevents memory exhaustion)
+- Reader properly cancelled on all error paths (no socket leaks)
+
+### Worst-Case Latency
+
+| Scenario | Calculation | Total |
+|----------|-------------|-------|
+| All connect timeouts | 4 × 30s + 7s backoff | **127s** |
+| Queue error (fast path) | 1 × connect + peek | **~3-5s** |
+| Stream stall (mid-stream) | stallTimeoutMs | **90s** |
+| 10 accounts all queued | 10 × ~3s + combo cooldown | **~35s** |
+
+### Fallback Integration
+
+The executor's error responses are designed to integrate with 9Router's multi-layer fallback system:
+
+| Error Code | Account Layer | Combo Layer |
+|------------|---------------|-------------|
+| 503 (`service_unavailable`) | Exponential backoff (capacity rule) | Falls through to next model |
+| 502 (`upstream_error`) | 30s lock (transient rule) | Falls through to next model |
+| 499 (`aborted`) | 30s lock (but pointless — client gone) | N/A |
+| 401/403 | 2min lock | Falls through to next model |
+| 429 | Exponential backoff | Falls through to next model |
+
+### Configuration Summary
+
+| Constant | Value | Location | Purpose |
+|----------|-------|----------|---------|
+| `QODER_MAX_RETRIES` | 3 | `shared/qoder/constants.js` | Max retry attempts |
+| `QODER_RETRYABLE_STATUSES` | `{502, 503, 504}` | `shared/qoder/constants.js` | HTTP statuses to retry |
+| `QODER_CONNECT_TIMEOUT_MS` | 30,000ms | `shared/qoder/constants.js` | Per-attempt connect timeout |
+| `stallTimeoutMs` | 90,000ms | `providers/registry/qoder-api.js` | Stream stall detection |
+| `PEEK_TIMEOUT_MS` | 10,000ms | `executors/qoderApi.js` | First frame peek timeout |
+| `PEEK_BUFFER_CAP` | 65,536 bytes | `executors/qoderApi.js` | Peek buffer size limit |

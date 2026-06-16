@@ -63,8 +63,6 @@ MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDA8iMH5c02LilrsERw9t6Pv5Nc
 XcW+ML9FoCI6AOvOzwIDAQAB
 -----END PUBLIC KEY-----`;
 
-// ─── Qoder API (gyj-bf features) ────────────────────────────────────────────
-
 export const QODER_DEFAULTS = Object.freeze({
   region: "sg",
   cosyVersion: "2.11.2",
@@ -107,6 +105,10 @@ export function getQoderCosyVersion() {
 export const DEFAULT_MAX_OUTPUT_TOKENS = 32768;
 
 export const DEFAULT_TEMPERATURE = 0.1;
+
+export const QODER_MAX_RETRIES = 3;
+export const QODER_RETRYABLE_STATUSES = new Set([502, 503, 504]);
+export const QODER_CONNECT_TIMEOUT_MS = 30_000;
 
 export const QODER_MACHINE_OS_OPTIONS = [
   "x86_64_darwin",
