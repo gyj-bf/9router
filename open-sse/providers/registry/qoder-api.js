@@ -14,9 +14,7 @@ export default {
     notice: {
       text: "This provider uses a Personal Access Token. Account may be restricted or banned. Use at your own risk.",
       apiKeyUrl: "https://qoder.com/account/integrations",
-    },
-    deprecated: true,
-    deprecationNotice: "RISK_NOTICE",
+    }
   },
   category: "apikey",
   transport: {
