@@ -34,10 +34,10 @@ export default {
     { id: "lite", name: "Qoder Lite" },
     { id: "qmodel_latest", name: "Qwen3.7-Max (Qoder)" },
     { id: "qmodel", name: "Qwen3.7-Plus (Qoder)" },
-    { id: "dmodel", name: "DeepSeek-V4-Pro (Qoder)" },
-    { id: "dfmodel", name: "DeepSeek-V4-Flash (Qoder)" },
     { id: "gm51model", name: "GLM-5.1 (Qoder)" },
     { id: "kmodel", name: "Kimi-K2.7-Code (Qoder)" },
+    { id: "dmodel", name: "DeepSeek-V4-Pro (Qoder)" },
+    { id: "dfmodel", name: "DeepSeek-V4-Flash (Qoder)" },
     { id: "mmodel", name: "MiniMax-M3 (Qoder)" },
   ],
   oauth: {

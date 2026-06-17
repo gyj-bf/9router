@@ -77,7 +77,36 @@ export const MODEL_CAPABILITIES = {
 /**
  * Provider-specific capability overrides. Keyed by provider alias/id.
  */
-export const PROVIDER_CAPABILITIES = {};
+export const PROVIDER_CAPABILITIES = {
+  "qoder-api": {
+    auto:          { vision: true, contextWindow: 1000000 },
+    ultimate:      { vision: true, reasoning: true, contextWindow: 1000000 },
+    performance:   { vision: true, contextWindow: 1000000 },
+    efficient:     { vision: true, contextWindow: 1000000 },
+    lite:          { vision: true, contextWindow: 1000000 },
+    qmodel_latest: { vision: true, contextWindow: 1000000 },
+    qmodel:        { vision: true, contextWindow: 1000000 },
+    gm51model:     { vision: true, reasoning: true, contextWindow: 1000000 },
+    kmodel:        { vision: true, contextWindow: 1000000 },
+    dmodel:        { vision: true, reasoning: true, contextWindow: 1000000 },
+    dfmodel:       { vision: true, reasoning: true, contextWindow: 1000000 },
+    mmodel:        { vision: true, contextWindow: 1000000 },
+  },
+  qoder: {
+    auto:          { vision: true, contextWindow: 1000000 },
+    ultimate:      { vision: true, reasoning: true, contextWindow: 1000000 },
+    performance:   { vision: true, contextWindow: 1000000 },
+    efficient:     { vision: true, contextWindow: 1000000 },
+    lite:          { vision: true, contextWindow: 1000000 },
+    qmodel_latest: { vision: true, contextWindow: 1000000 },
+    qmodel:        { vision: true, contextWindow: 1000000 },
+    gm51model:     { vision: true, reasoning: true, contextWindow: 1000000 },
+    kmodel:        { vision: true, contextWindow: 1000000 },
+    dmodel:        { vision: true, reasoning: true, contextWindow: 1000000 },
+    dfmodel:       { vision: true, reasoning: true, contextWindow: 1000000 },
+    mmodel:        { vision: true, contextWindow: 1000000 },
+  },
+};
 
 /**
  * Pattern fallback — glob (* = wildcard), matched case-insensitively and

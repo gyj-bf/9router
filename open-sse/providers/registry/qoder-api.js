@@ -33,10 +33,10 @@ export default {
     { id: "lite", name: "Lite" },
     { id: "qmodel_latest", name: "Qwen3.7-Max" },
     { id: "qmodel", name: "Qwen3.7-Plus" },
-    { id: "dmodel", name: "DeepSeek-V4-Pro" },
-    { id: "dfmodel", name: "DeepSeek-V4-Flash" },
     { id: "gm51model", name: "GLM-5.1" },
     { id: "kmodel", name: "Kimi-K2.7-Code" },
+    { id: "dmodel", name: "DeepSeek-V4-Pro" },
+    { id: "dfmodel", name: "DeepSeek-V4-Flash" },
     { id: "mmodel", name: "MiniMax-M3" },
   ],
   features: {
