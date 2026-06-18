@@ -27,7 +27,7 @@ import { exchangeQoderApiToken, isQoderApiSessionValid } from "../../src/lib/qod
 import { proxyAwareFetch } from "../utils/proxyFetch.js";
 import * as logger from "../../src/sse/utils/logger.js";
 
-const LOG_TAG = "Qoder API";
+const LOG_TAG = "QODER API";
 
 function errorResponse(message, type, code, status) {
   return new Response(

@@ -2,7 +2,7 @@ import { getSettings } from "@/lib/localDb";
 import { applyQoderSettingsToEnv } from "@/lib/qoder/qoderEnv";
 import * as logger from "@/sse/utils/logger";
 
-const LOG_TAG = "Qoder Settings";
+const LOG_TAG = "QODER SETTINGS";
 
 let initPromise = null;
 

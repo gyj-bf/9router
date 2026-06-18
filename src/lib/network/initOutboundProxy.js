@@ -2,7 +2,7 @@ import { getSettings } from "@/lib/localDb";
 import { applyOutboundProxyEnv } from "@/lib/network/outboundProxy";
 import * as logger from "@/sse/utils/logger";
 
-const LOG_TAG = "Outbound Proxy";
+const LOG_TAG = "OUTBOUND PROXY";
 
 let initPromise = null;
 
