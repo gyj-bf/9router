@@ -1198,7 +1198,7 @@ export default function ProfilePage() {
                 <label className="font-medium text-sm sm:text-base">COSY Version</label>
                 <p className="text-xs sm:text-sm text-text-muted">Protocol version for COSY header signing.</p>
                 <Input
-                  placeholder="2.11.2"
+                  placeholder="1.0.22"
                   value={qoderForm.qoderCosyVersion}
                   onChange={(e) => setQoderForm((prev) => ({ ...prev, qoderCosyVersion: e.target.value }))}
                   disabled={qoderLoading}

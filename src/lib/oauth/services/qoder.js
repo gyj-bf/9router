@@ -2,6 +2,7 @@ import {
   QODER_DEVICE_TOKEN_URL,
   QODER_LOGIN_URL,
   QODER_USERINFO_URL,
+  QODER_USER_AGENT,
 } from "../../qoder/constants.js";
 import crypto from "crypto";
 import { v4 as uuidv4 } from "uuid";
@@ -104,7 +105,8 @@ export class QoderService {
       method: "GET",
       headers: {
         Accept: "application/json",
-        "User-Agent": "Go-http-client/2.0",
+        "User-Agent": QODER_USER_AGENT,
+        "cosy-data-policy": "disagree",
       },
     });
 
@@ -160,7 +162,8 @@ export class QoderService {
         headers: {
           Authorization: `Bearer ${accessToken}`,
           Accept: "application/json",
-          "User-Agent": "Go-http-client/2.0",
+          "User-Agent": QODER_USER_AGENT,
+          "cosy-data-policy": "disagree",
         },
       });
       if (!response.ok) return { name: "", email: "" };

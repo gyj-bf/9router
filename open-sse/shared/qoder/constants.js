@@ -63,9 +63,10 @@ MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDA8iMH5c02LilrsERw9t6Pv5Nc
 XcW+ML9FoCI6AOvOzwIDAQAB
 -----END PUBLIC KEY-----`;
 
+// Qoder API
 export const QODER_DEFAULTS = Object.freeze({
   region: "sg",
-  cosyVersion: "2.11.2",
+  cosyVersion: "1.0.22",
   mitmBypassQoder: false,
   mitmBypassExtraHosts: "",
 });
@@ -102,20 +103,6 @@ export function getQoderCosyVersion() {
   return process.env.QODER_COSY_VERSION || QODER_DEFAULTS.cosyVersion;
 }
 
-export const DEFAULT_MAX_OUTPUT_TOKENS = 32768;
-
-export const DEFAULT_TEMPERATURE = 0.1;
-
-export const QODER_MAX_RETRIES = 3;
-export const QODER_RETRYABLE_STATUSES = new Set([502, 503, 504]);
-export const QODER_CONNECT_TIMEOUT_MS = 30_000;
-export const QODER_PEEK_TIMEOUT_MS = 10_000;
-export const QODER_PEEK_BUFFER_CAP = 65_536;
-export const QODER_SESSION_TIMEOUT_MS = 15_000;    // token exchange timeout
-export const QODER_TEST_TIMEOUT_MS = 15_000;        // provider test probe timeout
-export const QODER_STALL_TIMEOUT_MS = 60_000;
-export const QODER_REQUEST_TIMEOUT_MS = 120_000;
-
 export const QODER_MACHINE_OS_OPTIONS = [
   "x86_64_darwin",
   "arm64_darwin",
@@ -125,19 +112,38 @@ export const QODER_MACHINE_OS_OPTIONS = [
   "arm64_windows",
 ];
 
-export const QODER_ACTIVITY_URL = `${QODER_CENTER_BASE}/algo/api/v2/activity`;
+export const QODER_USER_AGENT = `qoder/${QODER_DEFAULTS.cosyVersion}`;
+
+export const QODER_DEFAULT_TEMPERATURE = 0.1;
+export const QODER_DEFAULT_REASONING_EFFORT = "max";
+export const QODER_DEFAULT_MAX_THINKING_TOKENS = 49153;
+export const QODER_DEFAULT_MAX_INPUT_TOKENS = 180000;
+export const QODER_BUSINESS_NAME_MAX_LENGTH = 100;
 
 export const QODER_MODEL_CONFIG_MAP = {
-  auto: { display_name: "Auto", is_reasoning: false, is_vl: true, format: "openai", source: "system", max_input_tokens: 180000 },
-  ultimate: { display_name: "Ultimate", is_reasoning: true, is_vl: true, format: "openai", source: "system", max_input_tokens: 180000 },
+  auto: { display_name: "Auto", is_reasoning: false, is_vl: true, format: "openai", source: "system", max_input_tokens: QODER_DEFAULT_MAX_INPUT_TOKENS },
+  ultimate: { display_name: "Ultimate", is_reasoning: true, is_vl: true, format: "openai", source: "system", max_input_tokens: QODER_DEFAULT_MAX_INPUT_TOKENS },
   performance: { display_name: "Performance", is_reasoning: false, is_vl: true, format: "openai", source: "system", max_input_tokens: 272000 },
-  efficient: { display_name: "Efficient", is_reasoning: false, is_vl: true, format: "openai", source: "system", max_input_tokens: 180000 },
-  lite: { display_name: "Lite", is_reasoning: false, is_vl: true, format: "openai", source: "system", max_input_tokens: 180000 },
-  qmodel_latest: { display_name: "Qwen3.7-Max", is_reasoning: false, is_vl: true, format: "openai", source: "system", max_input_tokens: 180000 },
-  qmodel: { display_name: "Qwen3.7-Plus", is_reasoning: false, is_vl: true, format: "openai", source: "system", max_input_tokens: 180000 },
-  gm51model: { display_name: "GLM-5.1", is_reasoning: true, is_vl: true, format: "openai", source: "system", max_input_tokens: 180000 },
+  efficient: { display_name: "Efficient", is_reasoning: false, is_vl: true, format: "openai", source: "system", max_input_tokens: QODER_DEFAULT_MAX_INPUT_TOKENS },
+  lite: { display_name: "Lite", is_reasoning: false, is_vl: true, format: "openai", source: "system", max_input_tokens: QODER_DEFAULT_MAX_INPUT_TOKENS },
+  qmodel_latest: { display_name: "Qwen3.7-Max", is_reasoning: false, is_vl: true, format: "openai", source: "system", max_input_tokens: QODER_DEFAULT_MAX_INPUT_TOKENS },
+  qmodel: { display_name: "Qwen3.7-Plus", is_reasoning: false, is_vl: true, format: "openai", source: "system", max_input_tokens: QODER_DEFAULT_MAX_INPUT_TOKENS },
+  gm51model: { display_name: "GLM-5.1", is_reasoning: true, is_vl: true, format: "openai", source: "system", max_input_tokens: QODER_DEFAULT_MAX_INPUT_TOKENS },
   kmodel: { display_name: "Kimi-K2.7-Code", is_reasoning: false, is_vl: true, format: "openai", source: "system", max_input_tokens: 256000 },
-  dmodel: { display_name: "DeepSeek-V4-Pro", is_reasoning: true, is_vl: true, format: "openai", source: "system", max_input_tokens: 180000 },
-  dfmodel: { display_name: "DeepSeek-V4-Flash", is_reasoning: true, is_vl: true, format: "openai", source: "system", max_input_tokens: 180000 },
-  mmodel: { display_name: "MiniMax-M3", is_reasoning: false, is_vl: true, format: "openai", source: "system", max_input_tokens: 180000 },
+  dmodel: { display_name: "DeepSeek-V4-Pro", is_reasoning: true, is_vl: true, format: "openai", source: "system", max_input_tokens: QODER_DEFAULT_MAX_INPUT_TOKENS },
+  dfmodel: { display_name: "DeepSeek-V4-Flash", is_reasoning: true, is_vl: true, format: "openai", source: "system", max_input_tokens: QODER_DEFAULT_MAX_INPUT_TOKENS },
+  mmodel: { display_name: "MiniMax-M3", is_reasoning: false, is_vl: true, format: "openai", source: "system", max_input_tokens: QODER_DEFAULT_MAX_INPUT_TOKENS },
 };
+
+export const QODER_MAX_RETRIES = 5;
+export const QODER_RETRY_BASE_DELAY_MS = 500;
+export const QODER_RETRY_MAX_DELAY_MS = 3000;
+export const QODER_RETRY_JITTER = 0.1;
+export const QODER_RETRYABLE_STATUSES = new Set([502, 503, 504]);
+export const QODER_CONNECT_TIMEOUT_MS = 30_000;
+export const QODER_PEEK_TIMEOUT_MS = 10_000;
+export const QODER_PEEK_BUFFER_CAP = 65_536;
+export const QODER_SESSION_TIMEOUT_MS = 15_000;     // token exchange timeout
+export const QODER_TEST_TIMEOUT_MS = 15_000;        // provider test probe timeout
+export const QODER_STALL_TIMEOUT_MS = 60_000;
+export const QODER_REQUEST_TIMEOUT_MS = 120_000;

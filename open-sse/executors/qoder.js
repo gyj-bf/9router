@@ -32,7 +32,9 @@ import { SSE_DONE } from "../utils/sseConstants.js";
 import { FETCH_CONNECT_TIMEOUT_MS } from "../config/runtimeConfig.js";
 import {
   QODER_CHAT_URL_ENCODED,
-  QODER_MODEL_MAP,
+  getQoderCosyVersion,
+  QODER_BUSINESS_NAME_MAX_LENGTH,
+  QODER_USER_AGENT,
 } from "../shared/qoder/constants.js";
 import { getQoderModelConfig, resolveQoderModels } from "../services/qoderModels.js";
 
@@ -119,7 +121,7 @@ function stableChatRecordId(model, messages, tools, maxTokens) {
 }
 
 function truncate(s, n) {
-  return s && s.length > n ? `${s.slice(0, n)}...` : s || "";
+  return s && s.length > n ? s.slice(0, n) : s || "";
 }
 
 /**
@@ -201,11 +203,11 @@ async function buildQoderRequestBody({ model, body, credentials, log, proxyOptio
       model_config: modelConfig,
       business: {
         product: "cli",
-        version: "1.0.0",
+        version: getQoderCosyVersion(),
         type: "agent",
         stage: "start",
         id: uuidv4(),
-        name: truncate(lastUser, 30),
+        name: truncate(lastUser, QODER_BUSINESS_NAME_MAX_LENGTH),
         begin_at: Date.now(),
       },
     },
@@ -402,10 +404,11 @@ export class QoderExecutor extends BaseExecutor {
       "Content-Type": "application/json",
       Accept: "text/event-stream",
       "Cache-Control": "no-cache",
+      "Accept-Encoding": "identity",
+      "Accept-Language": "en-US",
+      "User-Agent": QODER_USER_AGENT,
       "X-Model-Key": qoderKey,
       "X-Model-Source": modelSource,
-      // gzip triggers signature validation on Qoder's CDN; force identity.
-      "Accept-Encoding": "identity",
       ...cosyHeaders,
     };
 

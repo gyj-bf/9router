@@ -108,7 +108,7 @@ describe("qoder-api session helper", () => {
       date: "Tue, 02 Jun 2026 00:00:00 GMT",
       "content-type": "application/json",
       "cosy-machineid": "machine-1",
-      "user-agent": "Go-http-client/2.0",
+      "user-agent": "qoder/1.0.22",
     });
     expect(request.headers.signature).toMatch(/^[a-f0-9]{32}$/);
     expect(session).toEqual({
@@ -219,7 +219,7 @@ describe("qoder-api executor request mapping", () => {
     expect(payload.version).toBe("3");
     expect(payload.business).toMatchObject({ product: "cli", type: "agent", stage: "start" });
     expect(payload.chat_context.extra.modelConfig).toEqual({ key: "lite", is_reasoning: false });
-    expect(payload.parameters.max_tokens).toBe(32768);
+    expect(payload.parameters.max_tokens).toBe(49153);
     expect(payload.tools).toEqual(body.tools);
     expect(payload.system).toBe("You are concise.");
     expect(payload.messages.map((message) => message.role)).toEqual(["user", "assistant", "tool", "user"]);
@@ -242,7 +242,7 @@ describe("qoder-api executor request mapping", () => {
 
     expect(payload.model_config).toMatchObject({
       key: "qmodel_latest",
-      display_name: "Qwen 3.7 Max",
+      display_name: "Qwen3.7-Max",
       format: "openai",
       source: "system",
       max_input_tokens: 180000,
@@ -253,7 +253,7 @@ describe("qoder-api executor request mapping", () => {
       agent_id: "agent_common",
       task_id: "common",
       chat_task: "FREE_INPUT",
-      aliyun_user_type: "personal_standard",
+      aliyun_user_type: "",
       source: 1,
       version: "3",
       is_reply: true,
@@ -1017,7 +1017,7 @@ describe("qoder-api max_completion_tokens parameter", () => {
 
     const payload = buildQoderApiPayload(body, baseParams);
 
-    expect(payload.parameters.max_tokens).toBe(32768);
+    expect(payload.parameters.max_tokens).toBe(49153);
   });
 
   it("accepts max_completion_tokens: 0", () => {
@@ -1028,7 +1028,7 @@ describe("qoder-api max_completion_tokens parameter", () => {
 
     const payload = buildQoderApiPayload(body, baseParams);
 
-    expect(payload.parameters.max_tokens).toBe(32768);
+    expect(payload.parameters.max_tokens).toBe(49153);
   });
 });
 
@@ -1122,9 +1122,9 @@ describe("qoder-api dashboard metadata", () => {
   it("has static qoder-api models with the requested English labels", () => {
     const models = PROVIDER_MODELS.qda || [];
     const byId = new Map(models.map((model) => [model.id, model.name]));
-    expect(byId.get("lite")).toBe("Free tier");
-    expect(byId.get("qmodel_latest")).toBe("Qwen 3.7 Max");
-    expect(byId.get("ultimate")).toBe("Highest tier");
+    expect(byId.get("lite")).toBe("Lite");
+    expect(byId.get("qmodel_latest")).toBe("Qwen3.7-Max");
+    expect(byId.get("ultimate")).toBe("Ultimate");
     expect([...byId.values()].join(" ")).not.toMatch(/undisclosed model/i);
   });
 
@@ -1793,7 +1793,7 @@ describe("qoder-api Cosy headers", () => {
     vi.restoreAllMocks();
   });
 
-  it("sends Cosy-Version 2.11.2 in chat request headers", async () => {
+  it("sends Cosy-Version 1.0.22 in chat request headers", async () => {
     proxyAwareFetch
       .mockResolvedValueOnce(new Response(JSON.stringify({
         name: "User",
@@ -1815,7 +1815,7 @@ describe("qoder-api Cosy headers", () => {
     });
 
     const chatRequest = proxyAwareFetch.mock.calls[1][1];
-    expect(chatRequest.headers["Cosy-Version"]).toBe("2.11.2");
+    expect(chatRequest.headers["Cosy-Version"]).toBe("1.0.22");
   });
 
   it("sends random Cosy-Machineos from valid platform list", async () => {
@@ -2049,6 +2049,8 @@ describe("qoder-api error handling and logging", () => {
         .mockRejectedValueOnce(new Error("Network error"))
         .mockRejectedValueOnce(new Error("Network error"))
         .mockRejectedValueOnce(new Error("Network error"))
+        .mockRejectedValueOnce(new Error("Network error"))
+        .mockRejectedValueOnce(new Error("Network error"))
         .mockRejectedValueOnce(new Error("Network error"));
 
       const executor = new QoderApiExecutor();
@@ -2063,6 +2065,8 @@ describe("qoder-api error handling and logging", () => {
 
       await vi.advanceTimersByTimeAsync(1_000);
       await vi.advanceTimersByTimeAsync(2_000);
+      await vi.advanceTimersByTimeAsync(4_000);
+      await vi.advanceTimersByTimeAsync(4_000);
       await vi.advanceTimersByTimeAsync(4_000);
 
       const result = await resultPromise;
@@ -2223,6 +2227,8 @@ describe("qoder-api error handling and logging", () => {
         .mockRejectedValueOnce(new Error("Network error"))
         .mockRejectedValueOnce(new Error("Network error"))
         .mockRejectedValueOnce(new Error("Network error"))
+        .mockRejectedValueOnce(new Error("Network error"))
+        .mockRejectedValueOnce(new Error("Network error"))
         .mockRejectedValueOnce(new Error("Network error"));
 
       const executor = new QoderApiExecutor();
@@ -2237,6 +2243,8 @@ describe("qoder-api error handling and logging", () => {
 
       await vi.advanceTimersByTimeAsync(1_000);
       await vi.advanceTimersByTimeAsync(2_000);
+      await vi.advanceTimersByTimeAsync(4_000);
+      await vi.advanceTimersByTimeAsync(4_000);
       await vi.advanceTimersByTimeAsync(4_000);
 
       const result = await resultPromise;

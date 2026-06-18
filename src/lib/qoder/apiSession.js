@@ -1,7 +1,7 @@
 import crypto from "crypto";
 
 import { qoderEncodeBody } from "./encoding.js";
-import { QODER_SESSION_TIMEOUT_MS } from "../../../open-sse/shared/qoder/constants.js";
+import { QODER_SESSION_TIMEOUT_MS, QODER_USER_AGENT } from "../../../open-sse/shared/qoder/constants.js";
 import { proxyAwareFetch } from "../../../open-sse/utils/proxyFetch.js";
 
 export const QODER_API_JOB_TOKEN_URL = "https://center.qoder.sh/algo/api/v3/user/jobToken?Encode=1";
@@ -97,8 +97,10 @@ export async function exchangeQoderApiToken(token, options = {}, proxyOptions = 
       date,
       signature: signQoderExchange(date),
       "content-type": "application/json",
+      "Accept-Language": "en-US",
+      "cosy-data-policy": "disagree",
       "cosy-machineid": machine.machineId,
-      "user-agent": "Go-http-client/2.0",
+      "user-agent": QODER_USER_AGENT,
     },
     body: encodedBody,
     signal,
@@ -119,7 +121,7 @@ export async function exchangeQoderApiToken(token, options = {}, proxyOptions = 
   return {
     userId,
     name: data.name || "",
-    userType: data.userType || "personal_standard",
+    userType: data.userType || "",
     securityOauthToken,
     refreshToken: data.refreshToken || "",
     email: data.email || "",

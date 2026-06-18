@@ -30,7 +30,9 @@ cosy-version: 0.1.43
 cosy-clienttype: 5
 signature: md5("cosy&d2FyLCB3YXIgbmV2ZXIgY2hhbmdlcw==&" + date)
 cosy-machineid: <generated>
-user-agent: Go-http-client/2.0
+user-agent: qoder/1.0.22
+accept-language: en-US
+cosy-data-policy: disagree
 ```
 
 **Response:**
@@ -61,7 +63,9 @@ curl 'https://center.qoder.sh/algo/api/v3/user/jobToken?Encode=1' \
   -H 'signature: 8f0b7f4b77f37b2d8f2f8d7a2c9d4f2a' \
   -H 'content-type: application/json' \
   -H 'cosy-machineid: 7b8e3f0e-dc9f-44b0-95c8-8d8d597b3f7a' \
-  -H 'user-agent: Go-http-client/2.0' \
+  -H 'user-agent: qoder/1.0.22' \
+  -H 'accept-language: en-US' \
+  -H 'cosy-data-policy: disagree' \
   --data-binary '@.qoder-exchange-body.tmp'
 ```
 
@@ -92,8 +96,10 @@ curl 'https://center.qoder.sh/algo/api/v3/user/jobToken?Encode=1' \
     "is_reasoning": false
   },
   "parameters": {
-    "max_tokens": 32768,
-    "temperature": 0.1
+    "max_tokens": 49153,
+    "temperature": 0.1,
+    "reasoning_effort": "max",
+    "max_thinking_tokens": 49153
   },
   "messages": [
     {"role": "user", "content": "Hello"}
@@ -104,8 +110,8 @@ curl 'https://center.qoder.sh/algo/api/v3/user/jobToken?Encode=1' \
 **Notes:**
 - `model_config.is_vl` auto-set to `true` when images present
 - `temperature` default: 0.1 (low randomness for coding)
-- `max_tokens` default: 32768 (high for complex tasks)
-- `cosy-version: 2.11.2` (configurable via Dashboard → Profile → Qoder API Provider)
+- `max_tokens` default: 49153 (same as `QODER_DEFAULT_MAX_THINKING_TOKENS`)
+- `cosy-version: 1.0.22` (configurable via Dashboard → Profile → Qoder API Provider)
 - `cosy-machineos`: random from 6 platforms (anti-fingerprinting)
 
 **Example curl:**
@@ -116,11 +122,12 @@ curl -N 'https://api3.qoder.sh/algo/api/v2/service/pro/sse/agent_chat_generation
   -H 'accept: text/event-stream' \
   -H 'cache-control: no-cache' \
   -H 'accept-encoding: identity' \
+  -H 'accept-language: en-US' \
   -H 'authorization: Bearer COSY.eyJ2ZXJzaW9uIjoidjEiLCJyZXF1ZXN0SWQiOiI4NDQwNzFhOC0xN2JkLTQyNzEtYjE4ZS0xMTE1NTAwMGQwMDAiLCJpbmZvIjoiLi4uIiwiY29zeVZlcnNpb24iOiIxLjAuMCIsImlkZVZlcnNpb24iOiIifQ==.a4b12e0e3f4410c65dd4a65d4a87df33' \
   -H 'cosy-key: VktUeW9qZzZLbnJmY2l1RjZkQjZPQzB4RjB0R3pQYk5uQzZ6S2s9' \
   -H 'cosy-user: 1234567890' \
   -H 'cosy-date: 1780423640' \
-  -H 'cosy-version: 2.11.2' \
+  -H 'cosy-version: 1.0.22' \
   -H 'cosy-machineid: 7b8e3f0e-dc9f-44b0-95c8-8d8d597b3f7a' \
   -H 'cosy-machinetoken: MjFhOTJmYWItYmU1Zi00NzMwLTk3ZTAtMzI1ODRlYTU4NDUwY2M1YzQ1N2EtYz' \
   -H 'cosy-machinetype: 3f7c2a8d9b104e6f91' \
@@ -182,11 +189,12 @@ curl -N 'https://api3.qoder.sh/algo/api/v2/service/pro/sse/agent_chat_generation
   -H 'accept: text/event-stream' \
   -H 'cache-control: no-cache' \
   -H 'accept-encoding: identity' \
+  -H 'accept-language: en-US' \
   -H 'authorization: Bearer COSY.eyJ2ZXJzaW9uIjoidjEiLCJyZXF1ZXN0SWQiOiI1MjY4OTFhZS02YWE3LTRlZTctYmVlZS1jZjE3YjYyMDM4ZGIiLCJpbmZvIjoiLi4uIiwiY29zeVZlcnNpb24iOiIxLjAuMCIsImlkZVZlcnNpb24iOiIifQ==.c7d3f2a1b8e9...' \
   -H 'cosy-key: VktUeW9qZzZLbnJmY2l1RjZkQjZPQzB4RjB0R3pQYk5uQzZ6S2s9' \
   -H 'cosy-user: 1234567890' \
   -H 'cosy-date: 1780590148' \
-  -H 'cosy-version: 2.11.2' \
+  -H 'cosy-version: 1.0.22' \
   -H 'cosy-machineid: 7b8e3f0e-dc9f-44b0-95c8-8d8d597b3f7a' \
   -H 'cosy-machinetoken: MjFhOTJmYWItYmU1Zi00NzMwLTk3ZTAtMzI1ODRlYTU4NDUwY2M1YzQ1N2EtYz' \
   -H 'cosy-machinetype: 3f7c2a8d9b104e6f91' \
@@ -607,7 +615,7 @@ curl -s "https://center.qoder.sh/algo/api/v2/activity" \
   -H "Cosy-Key: <rsaEncryptedAesKey>" \
   -H "Cosy-User: <userId>" \
   -H "Cosy-Date: <unixTimestamp>" \
-  -H "Cosy-Version: 2.11.2" \
+  -H "Cosy-Version: 1.0.22" \
   -H "Cosy-Machineid: <machineId>" \
   -H "Cosy-Machinetoken: <machineToken>" \
   -H "Cosy-Machinetype: <machineType>" \
@@ -801,11 +809,11 @@ The error is emitted as a content chunk to the client: `\n[Upstream provider err
 | 403 | `model_not_enabled` | `model_not_enabled` | Model not enabled for this account (detected from upstream 403 response) | ❌ No |
 | 499 | `client_error` | `aborted` | Client disconnected before/during request | ❌ No |
 | 500 | `server_error` | `encoding_failed` | Body encoding failed | ❌ No |
-| 502 | `upstream_error` | `upstream_error` | Qoder API returned 5xx (after 3 retries exhausted) | ✅ Yes (3×) |
-| 502 | `upstream_error` | `upstream_unavailable` | All retry attempts exhausted | ✅ Yes (3×) |
+| 502 | `upstream_error` | `upstream_error` | Qoder API returned 5xx (after 5 retries exhausted) | ✅ Yes (5×) |
+| 502 | `upstream_error` | `upstream_unavailable` | All retry attempts exhausted | ✅ Yes (5×) |
 | 502 | `upstream_error` | `upstream_error` | Non-queue upstream error detected in first SSE frame | ❌ No (peek) |
 | 503 | `upstream_error` | `service_unavailable` | Queue error detected in first SSE frame (model overloaded) | ❌ No (peek) |
-| 503 | `server_error` | `network_error` | Network request failed after retries (DNS, timeout, connection refused) | ✅ Yes (3×) |
+| 503 | `server_error` | `network_error` | Network request failed after retries (DNS, timeout, connection refused) | ✅ Yes (5×) |
 
 ### Error Logging
 
@@ -905,7 +913,7 @@ All Qoder provider settings are configured via the dashboard UI. No `.env` confi
 | Setting | Description | Default |
 |---------|-------------|---------|
 | API Region | Regional inference host (`sg`, `jp`, `us`) | `sg` |
-| COSY Version | Protocol version for COSY header signing | `2.11.2` |
+| COSY Version | Protocol version for COSY header signing | `1.0.22` |
 | MITM DNS Bypass | Enable DNS bypass for enterprise firewalls | `false` |
 | Extra Bypass Hosts | Comma-separated additional hosts to bypass | _(empty)_ |
 
@@ -948,8 +956,11 @@ The qoder-api provider uses static model configurations (no live fetch from `/al
 ### Default Parameters
 
 ```javascript
-DEFAULT_MAX_OUTPUT_TOKENS = 32768  // High for complex coding tasks
-DEFAULT_TEMPERATURE = 0.1          // Low randomness for coding
+QODER_DEFAULT_TEMPERATURE = 0.1            // Low randomness for coding
+QODER_DEFAULT_REASONING_EFFORT = "max"     // Default reasoning effort level
+QODER_DEFAULT_MAX_THINKING_TOKENS = 49153  // Default max thinking tokens (also used as max_tokens default)
+QODER_DEFAULT_MAX_INPUT_TOKENS = 180000    // Default max input tokens
+QODER_BUSINESS_NAME_MAX_LENGTH = 100       // Max length for business name truncation
 ```
 
 ### Timeout & Retry Constants
@@ -958,8 +969,11 @@ All timeout and retry constants are centralized in `open-sse/shared/qoder/consta
 
 ```javascript
 QODER_CONNECT_TIMEOUT_MS = 30_000   // 30s per attempt (upstream must send headers within this)
-QODER_MAX_RETRIES = 3               // Max retry attempts for transient errors (502, 503, 504)
+QODER_MAX_RETRIES = 5               // Max retry attempts for transient errors (502, 503, 504)
 QODER_RETRYABLE_STATUSES = [502, 503, 504]  // HTTP statuses that trigger retry
+QODER_RETRY_BASE_DELAY_MS = 500     // 500ms base backoff delay
+QODER_RETRY_MAX_DELAY_MS = 3000     // 3s max backoff delay
+QODER_RETRY_JITTER = 0.1            // 10% jitter on backoff
 QODER_PEEK_TIMEOUT_MS = 10_000      // 10s max to read first SSE frame (pre-flight check)
 QODER_PEEK_BUFFER_CAP = 65_536      // 64KB max buffer during peek
 QODER_SESSION_TIMEOUT_MS = 15_000   // 15s for token exchange and provider test
@@ -996,7 +1010,7 @@ Other models can be forced into reasoning mode via `reasoning_effort`, `thinking
 | Parameter | Type | Description | Example |
 |-----------|------|-------------|---------|
 | `temperature` | number | Sampling temperature (0-2) | `0.7` |
-| `max_tokens` | number | Max output tokens | `4096` |
+| `max_tokens` | number | Max output tokens (default `49153`) | `4096` |
 | `max_completion_tokens` | number | Alias for max_tokens | `4096` |
 | `top_p` | number | Nucleus sampling (0-1) | `0.9` |
 | `presence_penalty` | number | Penalize tokens by presence (-2 to 2) | `0.5` |
@@ -1004,6 +1018,8 @@ Other models can be forced into reasoning mode via `reasoning_effort`, `thinking
 | `stop` | string/string[] | Stop sequences | `["\n", "END"]` |
 | `parallel_tool_calls` | boolean | Allow parallel tool calls | `false` |
 | `response_format` | object | Response format (e.g., JSON mode) | `{"type": "json_object"}` |
+| `reasoning_effort` | string | Reasoning effort level (default `"max"`) | `"max"` |
+| `max_thinking_tokens` | number | Max thinking tokens (default `49153`) | `49153` |
 
 ### Parameter Mapping
 
@@ -1056,12 +1072,20 @@ If only `max_completion_tokens` is present:
 // → parameters.max_tokens = 2048
 ```
 
-If neither is present, uses default `32768`.
+If neither is present, uses default `49153` (same as `QODER_DEFAULT_MAX_THINKING_TOKENS`).
 
 ### Reasoning Parameters
 
+`reasoning_effort` and `max_thinking_tokens` are always sent with defaults:
+
+```javascript
+QODER_DEFAULT_REASONING_EFFORT = "max"       // Default reasoning effort
+QODER_DEFAULT_MAX_THINKING_TOKENS = 49153    // Default max thinking tokens (also used as max_tokens default)
+```
+
 See section 4 for reasoning-specific parameters:
-- `reasoning_effort`: `"low"`, `"medium"`, `"high"`, `"none"`
+- `reasoning_effort`: `"low"`, `"medium"`, `"high"`, `"max"`, `"none"` (default: `"max"`)
+- `max_thinking_tokens`: number (default: `49153`)
 - `reasoning.effort`: nested format
 - `thinking.type`: `"enabled"`, `"disabled"`
 - `enable_thinking`: boolean
@@ -1096,21 +1120,31 @@ Client Request
 │                                                         │
 │  ┌──────────┐   502/503/504   ┌──────────┐             │
 │  │ Attempt 0│────────────────►│ Backoff  │──┐          │
-│  │ (30s max)│                 │   1s     │  │          │
+│  │ (30s max)│                 │  ~500ms  │  │          │
 │  └──────────┘                 └──────────┘  │          │
 │                                              ▼          │
 │  ┌──────────┐   502/503/504   ┌──────────┐             │
 │  │ Attempt 1│────────────────►│ Backoff  │──┐          │
-│  │ (30s max)│                 │   2s     │  │          │
+│  │ (30s max)│                 │  ~1s     │  │          │
 │  └──────────┘                 └──────────┘  │          │
 │                                              ▼          │
 │  ┌──────────┐   502/503/504   ┌──────────┐             │
 │  │ Attempt 2│────────────────►│ Backoff  │──┐          │
-│  │ (30s max)│                 │   4s     │  │          │
+│  │ (30s max)│                 │  ~2s     │  │          │
+│  └──────────┘                 └──────────┘  │          │
+│                                              ▼          │
+│  ┌──────────┐   502/503/504   ┌──────────┐             │
+│  │ Attempt 3│────────────────►│ Backoff  │──┐          │
+│  │ (30s max)│                 │  ~3s     │  │          │
+│  └──────────┘                 └──────────┘  │          │
+│                                              ▼          │
+│  ┌──────────┐   502/503/504   ┌──────────┐             │
+│  │ Attempt 4│────────────────►│ Backoff  │──┐          │
+│  │ (30s max)│                 │  ~3s     │  │          │
 │  └──────────┘                 └──────────┘  │          │
 │                                              ▼          │
 │  ┌──────────┐   502/503/504                  │          │
-│  │ Attempt 3│────────────────► Return 502    │          │
+│  │ Attempt 5│────────────────► Return 502    │          │
 │  │ (30s max)│   (all retries exhausted)      │          │
 │  └──────────┘                                │          │
 │       │                                      │          │
@@ -1143,7 +1177,7 @@ Client Request
 
 ### Retry Logic
 
-**Retryable errors** (retried up to 3 times with exponential backoff):
+**Retryable errors** (retried up to 5 times with exponential backoff):
 - HTTP 502 (Bad Gateway)
 - HTTP 503 (Service Unavailable)
 - HTTP 504 (Gateway Timeout)
@@ -1159,16 +1193,18 @@ Client Request
 
 ### Backoff Schedule
 
-Exponential backoff between retries: `2^(attempt-1) × 1000ms`
+Exponential backoff between retries: `min(2^(attempt-1) × 500ms, 3000ms)` with 10% jitter
 
 | Attempt | Backoff | Cumulative Wait |
 |---------|---------|-----------------|
 | 0 (initial) | 0ms | 0ms |
-| 1 (retry 1) | 1,000ms | 1s |
-| 2 (retry 2) | 2,000ms | 3s |
-| 3 (retry 3) | 4,000ms | 7s |
+| 1 (retry 1) | ~500ms | ~0.5s |
+| 2 (retry 2) | ~1,000ms | ~1.5s |
+| 3 (retry 3) | ~2,000ms | ~3.5s |
+| 4 (retry 4) | ~3,000ms | ~6.5s |
+| 5 (retry 5) | ~3,000ms | ~9.5s |
 
-Total worst-case backoff overhead: **7 seconds**.
+Total worst-case backoff overhead: **~10.5 seconds** (with 10% jitter).
 
 ### Abort Signal Passthrough
 
@@ -1208,7 +1244,7 @@ After a successful HTTP 200 response, the executor reads the first SSE frame bef
 
 | Scenario | Calculation | Total |
 |----------|-------------|-------|
-| All connect timeouts | 4 × 30s + 7s backoff | **127s** |
+| All connect timeouts | 6 × 30s + ~10.5s backoff | **~190s** |
 | Queue error (fast path) | 1 × connect + peek | **~3-5s** |
 | Stream stall (mid-stream) | stallTimeoutMs | **60s** |
 | 10 accounts all queued | 10 × ~3s + combo cooldown | **~35s** |
@@ -1229,7 +1265,7 @@ The executor's error responses are designed to integrate with 9Router's multi-la
 
 | Constant | Value | Location | Purpose |
 |----------|-------|----------|---------|
-| `QODER_MAX_RETRIES` | 3 | `shared/qoder/constants.js` | Max retry attempts |
+| `QODER_MAX_RETRIES` | 5 | `shared/qoder/constants.js` | Max retry attempts |
 | `QODER_RETRYABLE_STATUSES` | `{502, 503, 504}` | `shared/qoder/constants.js` | HTTP statuses to retry |
 | `QODER_CONNECT_TIMEOUT_MS` | 30,000ms | `shared/qoder/constants.js` | Per-attempt connect timeout |
 | `QODER_PEEK_TIMEOUT_MS` | 10,000ms | `shared/qoder/constants.js` | First frame peek timeout |
@@ -1237,3 +1273,9 @@ The executor's error responses are designed to integrate with 9Router's multi-la
 | `QODER_SESSION_TIMEOUT_MS` | 15,000ms | `shared/qoder/constants.js` | Token exchange & provider test timeout |
 | `QODER_STALL_TIMEOUT_MS` | 60,000ms | `shared/qoder/constants.js` | Stream stall detection (used by both `qoder-api.js` and `qoder.js` registries) |
 | `QODER_REQUEST_TIMEOUT_MS` | 120,000ms | `shared/qoder/constants.js` | Overall fetch timeout (used by both registries) |
+| `QODER_RETRY_BASE_DELAY_MS` | 500ms | `shared/qoder/constants.js` | Base backoff delay |
+| `QODER_RETRY_MAX_DELAY_MS` | 3,000ms | `shared/qoder/constants.js` | Max backoff delay |
+| `QODER_RETRY_JITTER` | 0.1 | `shared/qoder/constants.js` | Backoff jitter (10%) |
+| `DEFAULT_REASONING_EFFORT` | `"max"` | `shared/qoder/constants.js` | Default reasoning effort |
+| `DEFAULT_MAX_THINKING_TOKENS` | 32768 | `shared/qoder/constants.js` | Default max thinking tokens |
+| `QODER_BUSINESS_NAME_MAX_LENGTH` | 100 | `shared/qoder/constants.js` | Max business name length in payload |

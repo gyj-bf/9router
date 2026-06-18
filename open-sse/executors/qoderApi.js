@@ -6,13 +6,20 @@ import {
   QODER_MODEL_CONFIG_MAP,
   QODER_MACHINE_OS_OPTIONS,
   getQoderCosyVersion,
-  DEFAULT_MAX_OUTPUT_TOKENS,
-  DEFAULT_TEMPERATURE,
+  QODER_DEFAULT_TEMPERATURE,
+  QODER_DEFAULT_REASONING_EFFORT,
+  QODER_DEFAULT_MAX_THINKING_TOKENS,
+  QODER_BUSINESS_NAME_MAX_LENGTH,
   QODER_MAX_RETRIES,
+  QODER_RETRY_BASE_DELAY_MS,
+  QODER_RETRY_MAX_DELAY_MS,
+  QODER_RETRY_JITTER,
   QODER_RETRYABLE_STATUSES,
   QODER_CONNECT_TIMEOUT_MS,
   QODER_PEEK_TIMEOUT_MS,
   QODER_PEEK_BUFFER_CAP,
+  QODER_USER_AGENT,
+  QODER_DEFAULT_MAX_INPUT_TOKENS,
 } from "../../src/lib/qoder/constants.js";
 import { qoderEncodeBody } from "../../src/lib/qoder/encoding.js";
 import { buildCosyHeaders } from "../../src/lib/qoder/cosy.js";
@@ -188,7 +195,7 @@ function buildModelConfig(modelKey, modelConfig = {}) {
     api_key: modelConfig.api_key || "",
     url: modelConfig.url || "",
     source: modelConfig.source || "system",
-    max_input_tokens: modelConfig.max_input_tokens || 180000,
+    max_input_tokens: modelConfig.max_input_tokens || QODER_DEFAULT_MAX_INPUT_TOKENS,
     key: modelKey,
   };
 }
@@ -218,7 +225,7 @@ function sanitizeToolChoiceForReasoning(body, isReasoningActive) {
   return body;
 }
 
-export function buildQoderApiPayload(body, { modelKey, modelConfig, userId, userType = "personal_standard" }) {
+export function buildQoderApiPayload(body, { modelKey, modelConfig, userId }) {
   const allMessages = Array.isArray(body.messages) ? body.messages : [];
   const { messages, systemText } = hoistSystemMessages(allMessages);
   const prompt = latestUserText(messages);
@@ -254,7 +261,7 @@ export function buildQoderApiPayload(body, { modelKey, modelConfig, userId, user
     session_id: sessionId,
     stream: true,
     user_id: userId,
-    aliyun_user_type: userType || "personal_standard",
+    aliyun_user_type: "",
     chat_task: "FREE_INPUT",
     image_urls: hasImages ? imageUrls : null,
     is_reply: true,
@@ -270,11 +277,11 @@ export function buildQoderApiPayload(body, { modelKey, modelConfig, userId, user
     model_config: modelConfigPayload,
     business: {
       product: "cli",
-      version: "1.0.0",
+      version: getQoderCosyVersion(),
       type: "agent",
       stage: "start",
       id: requestId,
-      name: prompt.length > 100 ? prompt.slice(0, 100) : prompt,
+      name: prompt.length > QODER_BUSINESS_NAME_MAX_LENGTH ? prompt.slice(0, QODER_BUSINESS_NAME_MAX_LENGTH) : prompt,
       begin_at: now,
     },
     chat_context: {
@@ -289,8 +296,10 @@ export function buildQoderApiPayload(body, { modelKey, modelConfig, userId, user
       features: [],
     },
     parameters: {
-      max_tokens: body.max_tokens || body.max_completion_tokens || DEFAULT_MAX_OUTPUT_TOKENS,
-      temperature: body.temperature !== undefined ? body.temperature : DEFAULT_TEMPERATURE,
+      max_tokens: body.max_tokens || body.max_completion_tokens || QODER_DEFAULT_MAX_THINKING_TOKENS,
+      temperature: body.temperature !== undefined ? body.temperature : QODER_DEFAULT_TEMPERATURE,
+      reasoning_effort: body.reasoning_effort ?? QODER_DEFAULT_REASONING_EFFORT,
+      max_thinking_tokens: body.max_thinking_tokens ?? QODER_DEFAULT_MAX_THINKING_TOKENS,
       ...(body.top_p !== undefined && { top_p: body.top_p }),
       ...(body.presence_penalty !== undefined && { presence_penalty: body.presence_penalty }),
       ...(body.frequency_penalty !== undefined && { frequency_penalty: body.frequency_penalty }),
@@ -696,93 +705,19 @@ export class QoderApiExecutor {
     const modelKey = QoderApiExecutor.normalizeModelKey(model || body?.model);
     const modelConfig = QoderApiExecutor.getModelConfig(modelKey);
 
-    let transformedBody;
-    try {
-      transformedBody = buildQoderApiPayload(body || {}, {
-        modelKey,
-        modelConfig,
-        userId: session.userId,
-        userType: session.userType || "personal_standard",
-      });
-    } catch (error) {
-      logger.error(LOG_TAG, "Failed to build request payload", {
-        requestId,
-        error: error.message,
-      });
-      return {
-        response: errorResponse("Invalid request format",
-          "invalid_request_error", "invalid_request", 400),
-        url: chatUrl,
-        headers: {},
-        transformedBody: body,
-      };
-    }
-
-    let encodedBodyBuffer;
-    try {
-      const encodedBody = qoderEncodeBody(Buffer.from(JSON.stringify(transformedBody), "utf8"));
-      encodedBodyBuffer = Buffer.from(encodedBody, "latin1");
-    } catch (error) {
-      logger.error(LOG_TAG, "Failed to encode request body", {
-        requestId,
-        error: error.message,
-      });
-      return {
-        response: errorResponse("Internal processing error",
-          "server_error", "encoding_failed", 500),
-        url: chatUrl,
-        headers: {},
-        transformedBody,
-      };
-    }
-
-    let cosyHeaders;
-    try {
-      cosyHeaders = buildCosyHeaders(encodedBodyBuffer, chatUrl, {
-        userId: session.userId,
-        authToken: session.securityOauthToken,
-        name: session.name || "",
-        email: session.email || "",
-        machineId: session.machineId || "",
-        machineToken: session.machineToken || "",
-        machineType: session.machineType || "",
-        cosyVersion: getQoderCosyVersion(),
-        machineOs: QODER_MACHINE_OS_OPTIONS[Math.floor(Math.random() * QODER_MACHINE_OS_OPTIONS.length)],
-      });
-    } catch (error) {
-      logger.error(LOG_TAG, "Failed to build COSY headers", {
-        requestId,
-        error: error.message,
-      });
-      return {
-        response: errorResponse("Authentication failed",
-          "authentication_error", "auth_failed", 401),
-        url: chatUrl,
-        headers: {},
-        transformedBody,
-      };
-    }
-
-    const headers = {
-      "Content-Type": "application/json",
-      Accept: "text/event-stream",
-      "Cache-Control": "no-cache",
-      "Accept-Encoding": "identity",
-      "X-Model-Key": modelKey,
-      "X-Model-Source": modelConfig.source || "system",
-      ...cosyHeaders,
-    };
-
-    // Retry transient upstream errors (502, 503, 504) up to 3 times.
-    // Backoff: 1s → 2s → 4s. Non-retryable errors (400, 401, 403) return immediately.
+    // Retry transient upstream errors (502, 503, 504) up to 5 times.
+    // Backoff: 500ms base, 3s max, 10% jitter. Non-retryable errors (400, 401, 403) return immediately.
     const MAX_RETRIES = QODER_MAX_RETRIES;
     const RETRYABLE_STATUSES = QODER_RETRYABLE_STATUSES;
     let response;
     let lastError = null;
+    let transformedBody;
+    let headers;
 
     for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
       if (attempt > 0) {
-        const backoffMs = Math.pow(2, attempt - 1) * 1000;
+        const baseDelay = Math.min(QODER_RETRY_BASE_DELAY_MS * Math.pow(2, attempt - 1), QODER_RETRY_MAX_DELAY_MS);
+        const backoffMs = Math.round(baseDelay * (1 + QODER_RETRY_JITTER * Math.random()));
         logger.info(LOG_TAG, `Retry ${attempt}/${MAX_RETRIES} in ${backoffMs}ms`, {
           requestId,
           modelKey,
@@ -794,11 +729,88 @@ export class QoderApiExecutor {
           return {
             response: errorResponse("Request aborted", "client_error", "aborted", 499),
             url: chatUrl,
-            headers,
-            transformedBody,
+            headers: headers || {},
+            transformedBody: transformedBody || body,
           };
         }
       }
+
+      try {
+        transformedBody = buildQoderApiPayload(body || {}, {
+          modelKey,
+          modelConfig,
+          userId: session.userId,
+        });
+      } catch (error) {
+        logger.error(LOG_TAG, "Failed to build request payload", {
+          requestId,
+          error: error.message,
+        });
+        return {
+          response: errorResponse("Invalid request format",
+            "invalid_request_error", "invalid_request", 400),
+          url: chatUrl,
+          headers: {},
+          transformedBody: body,
+        };
+      }
+
+      let encodedBodyBuffer;
+      try {
+        const encodedBody = qoderEncodeBody(Buffer.from(JSON.stringify(transformedBody), "utf8"));
+        encodedBodyBuffer = Buffer.from(encodedBody, "latin1");
+      } catch (error) {
+        logger.error(LOG_TAG, "Failed to encode request body", {
+          requestId,
+          error: error.message,
+        });
+        return {
+          response: errorResponse("Internal processing error",
+            "server_error", "encoding_failed", 500),
+          url: chatUrl,
+          headers: {},
+          transformedBody,
+        };
+      }
+
+      let cosyHeaders;
+      try {
+        cosyHeaders = buildCosyHeaders(encodedBodyBuffer, chatUrl, {
+          userId: session.userId,
+          authToken: session.securityOauthToken,
+          name: session.name || "",
+          email: session.email || "",
+          machineId: session.machineId || "",
+          machineToken: session.machineToken || "",
+          machineType: session.machineType || "",
+          cosyVersion: getQoderCosyVersion(),
+          machineOs: QODER_MACHINE_OS_OPTIONS[Math.floor(Math.random() * QODER_MACHINE_OS_OPTIONS.length)],
+        });
+      } catch (error) {
+        logger.error(LOG_TAG, "Failed to build COSY headers", {
+          requestId,
+          error: error.message,
+        });
+        return {
+          response: errorResponse("Authentication failed",
+            "authentication_error", "auth_failed", 401),
+          url: chatUrl,
+          headers: {},
+          transformedBody,
+        };
+      }
+
+      headers = {
+        "Content-Type": "application/json",
+        Accept: "text/event-stream",
+        "Accept-Language": "en-US",
+        "Cache-Control": "no-cache",
+        "Accept-Encoding": "identity",
+        "User-Agent": QODER_USER_AGENT,
+        "X-Model-Key": modelKey,
+        "X-Model-Source": modelConfig.source || "system",
+        ...cosyHeaders,
+      };
 
       // Build abort signal: combine client disconnect + connect timeout
       const connectCtrl = new AbortController();
