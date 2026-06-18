@@ -1,4 +1,5 @@
 import { updateMitmBypassCache } from "../../../open-sse/utils/proxyFetch.js";
+import * as logger from "../../sse/utils/logger.js";
 import { QODER_DEFAULTS, QODER_REGION_HOSTS } from "./constants.js";
 
 const VALID_REGIONS = new Set(Object.keys(QODER_REGION_HOSTS));
@@ -47,4 +48,6 @@ export function applyQoderSettingsToEnv(
     mitmBypassQoder: bypassEnabled,
     mitmBypassExtraHosts: extraHosts,
   });
+
+  logger.debug("QODER API", `Settings applied | region=${region} | cosyVersion=${cosyVersion} | mitmBypass=${bypassEnabled} | mitmExtraHosts=${extraHosts}`);
 }

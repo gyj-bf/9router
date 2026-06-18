@@ -1,8 +1,9 @@
 import crypto from "crypto";
 
 import { qoderEncodeBody } from "./encoding.js";
-import { QODER_SESSION_TIMEOUT_MS, QODER_USER_AGENT } from "../../../open-sse/shared/qoder/constants.js";
+import { QODER_SESSION_TIMEOUT_MS, QODER_USER_AGENT, getQoderRegion, getQoderCosyVersion } from "../../../open-sse/shared/qoder/constants.js";
 import { proxyAwareFetch } from "../../../open-sse/utils/proxyFetch.js";
+import * as logger from "../../sse/utils/logger.js";
 
 export const QODER_API_JOB_TOKEN_URL = "https://center.qoder.sh/algo/api/v3/user/jobToken?Encode=1";
 
@@ -82,6 +83,8 @@ export async function exchangeQoderApiToken(token, options = {}, proxyOptions = 
   const signal = callerSignal
     ? AbortSignal.any([callerSignal, timeoutSignal])
     : timeoutSignal;
+
+  logger.debug("QODER API", `Token exchange | region=${getQoderRegion()} | url=${QODER_API_JOB_TOKEN_URL} | cosyVersion=${getQoderCosyVersion()} | mitmBypass=${Boolean(process.env.MITM_BYPASS_QODER)} | mitmExtraHosts=${process.env.MITM_BYPASS_EXTRA_HOSTS || ""}`);
 
   const response = await proxyAwareFetch(QODER_API_JOB_TOKEN_URL, {
     method: "POST",

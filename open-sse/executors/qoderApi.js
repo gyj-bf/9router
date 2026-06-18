@@ -2,6 +2,7 @@ import crypto from "crypto";
 
 import {
   getQoderChatUrl,
+  getQoderRegion,
   QODER_MODEL_MAP,
   QODER_MODEL_CONFIG_MAP,
   QODER_MACHINE_OS_OPTIONS,
@@ -683,6 +684,12 @@ export class QoderApiExecutor {
   async execute({ model, body, credentials, signal, provider, onCredentialsRefreshed, proxyOptions = null }) {
     const requestId = crypto.randomUUID();
     const chatUrl = getQoderChatUrl();
+    const region = getQoderRegion();
+
+    const modelKey = QoderApiExecutor.normalizeModelKey(model || body?.model);
+    const modelConfig = QoderApiExecutor.getModelConfig(modelKey);
+
+    logger.debug(LOG_TAG, `Chat generation | region=${region} | url=${chatUrl} | cosyVersion=${getQoderCosyVersion()} | model=${modelKey} | mitmBypass=${Boolean(process.env.MITM_BYPASS_QODER)} | mitmExtraHosts=${process.env.MITM_BYPASS_EXTRA_HOSTS || ""}`);
 
     let session;
     try {
@@ -701,9 +708,6 @@ export class QoderApiExecutor {
         transformedBody: body,
       };
     }
-
-    const modelKey = QoderApiExecutor.normalizeModelKey(model || body?.model);
-    const modelConfig = QoderApiExecutor.getModelConfig(modelKey);
 
     // Retry transient upstream errors (502, 503, 504) up to 5 times.
     // Backoff: 500ms base, 3s max, 10% jitter. Non-retryable errors (400, 401, 403) return immediately.

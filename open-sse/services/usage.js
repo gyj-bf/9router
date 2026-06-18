@@ -13,6 +13,7 @@ import { buildCosyHeaders } from "../../src/lib/qoder/cosy.js";
 import {
   getQoderActivityUrl,
   getQoderCosyVersion,
+  getQoderRegion,
   QODER_MACHINE_OS_OPTIONS,
   QODER_QUOTA_USAGE_URL,
 } from "../../src/lib/qoder/constants.js";
@@ -131,6 +132,8 @@ async function getQoderApiUsage(apiKey, providerSpecificData, proxyOptions = nul
 async function fetchQoderActivity(cosyCreds, proxyOptions) {
   const activityUrl = getQoderActivityUrl();
   const cosyHeaders = buildCosyHeaders("", activityUrl, cosyCreds);
+
+  logger.debug("QODER API USAGE", `Quota tracker | region=${getQoderRegion()} | url=${activityUrl} | cosyVersion=${getQoderCosyVersion()} | mitmBypass=${Boolean(process.env.MITM_BYPASS_QODER)} | mitmExtraHosts=${process.env.MITM_BYPASS_EXTRA_HOSTS || ""}`);
 
   const response = await proxyAwareFetch(
     activityUrl,

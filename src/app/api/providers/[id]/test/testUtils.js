@@ -18,7 +18,8 @@ import {
   KILOCODE_CONFIG,
 } from "@/lib/oauth/constants/oauth";
 import { buildClineHeaders } from "@/shared/utils/clineAuth";
-import { QODER_TEST_TIMEOUT_MS } from "open-sse/shared/qoder/constants.js";
+import { QODER_TEST_TIMEOUT_MS, getQoderRegion, getQoderCosyVersion, getQoderChatBase } from "open-sse/shared/qoder/constants.js";
+import * as logger from "@/sse/utils/logger.js";
 
 // OAuth provider test endpoints
 const OAUTH_TEST_CONFIG = {
@@ -404,6 +405,7 @@ async function testApiKeyConnection(connection, effectiveProxy = null) {
       case "qoder-api": {
         try {
           const { exchangeQoderApiToken } = await import("@/lib/qoder/apiSession.js");
+          logger.debug("QODER API", `Provider test | region=${getQoderRegion()} | chatBase=${getQoderChatBase()} | cosyVersion=${getQoderCosyVersion()} | mitmBypass=${Boolean(process.env.MITM_BYPASS_QODER)} | mitmExtraHosts=${process.env.MITM_BYPASS_EXTRA_HOSTS || ""}`);
           await exchangeQoderApiToken(connection.apiKey, connection.providerSpecificData?.qoderApiSession || {}, effectiveProxy);
           return { valid: true, error: null };
         } catch (err) {
