@@ -22,6 +22,8 @@
 - All model specs from live API probe + models.dev (19 models)
 - Reference: etteum-pool (`priyo000/etteum-pool`) for sanitizer rules and cleanMessages()
 - Reference: qoder-api branch (`feat/qoder-api-provider`) for provider pattern
+- Logger: Use `src/sse/utils/logger.js` with per-module LOG_TAG (uppercase). Each module defines its own tag: executor=`"CODEBUDDY CN API"`, sanitizer=`"SANITIZER"`, usage=`"CODEBUDDY CN USAGE"`, test=`"CODEBUDDY CN TEST"`, settings=`"CODEBUDDY CN SETTINGS"`
+- Default CLI version: `DEFAULT_CLI_VERSION = "2.109.0"` as named constant
 
 ## File Structure
 
@@ -71,8 +73,10 @@
 // src/lib/codebuddy-cn-api/constants.js
 
 // ── CLI Version (configurable via dashboard settings) ──
+export const DEFAULT_CLI_VERSION = "2.109.0";
+
 export function getCliVersion() {
-  return process.env.CODEBUDDY_CN_API_CLI_VERSION || "2.109.0";
+  return process.env.CODEBUDDY_CN_API_CLI_VERSION || DEFAULT_CLI_VERSION;
 }
 
 export function getUserAgent() {
@@ -248,18 +252,18 @@ export default {
 
 - [ ] **Step 2: Register in registry/index.js**
 
-Read `open-sse/providers/registry/index.js` to find the last import number (currently p93). Add:
+Read `open-sse/providers/registry/index.js` to find the last import number. Add using `p901` to match the provider priority:
 
 ```javascript
-// After the last import (e.g., import p93 from "...")
-import p94 from "./codebuddy-cn-api.js";
+// Use p901 to match provider priority — easy to find
+import p901 from "./codebuddy-cn-api.js";
 ```
 
-And append `p94` to the export array:
+And append `p901` to the export array:
 
 ```javascript
 export default [
-  p0, p1, /* ... */ p93, p94
+  p0, p1, /* ...existing entries... */, p901
 ];
 ```
 
@@ -456,36 +460,38 @@ git commit -m "feat(codebuddy-cn-api): add sanitizerRules DB table and repositor
 ```javascript
 // open-sse/services/sanitizer.js
 import { getSanitizerRulesByProvider } from "@/lib/db/repos/sanitizerRulesRepo.js";
+import * as logger from "@/sse/utils/logger.js";
 
-let cachedRules = null;
-let cacheTimestamp = 0;
-const CACHE_TTL_MS = 30_000;
+const LOG_TAG = "SANITIZER";
 
-export function invalidateSanitizerCache() {
-  cachedRules = null;
-  cacheTimestamp = 0;
+// ── Cache: load once, invalidate on CRUD, reload after CRUD ──
+let cache = [];
+
+export async function loadSanitizerCache() {
+  try {
+    cache = getSanitizerRulesByProvider("all"); // Load all + provider-specific
+    logger.debug(LOG_TAG, `Sanitizer cache loaded: ${cache.length} rules`);
+  } catch (e) {
+    logger.error(LOG_TAG, "Failed to load sanitizer cache", { error: e.message });
+  }
 }
 
-async function loadRules(provider) {
-  if (cachedRules && Date.now() - cacheTimestamp < CACHE_TTL_MS) {
-    return cachedRules;
-  }
-  const rules = getSanitizerRulesByProvider(provider);
-  cachedRules = rules.map(r => ({
-    ...r,
-    compiledRegex: r.type === "regex" ? new RegExp(r.pattern, "gi") : null,
-  }));
-  cacheTimestamp = Date.now();
-  return cachedRules;
+export function invalidateSanitizerCache() {
+  // Reload from DB after CRUD operation
+  loadSanitizerCache();
+}
+
+export function getSanitizerRules() {
+  return cache;
 }
 
 function applyRules(text, rules) {
   if (!text || typeof text !== "string") return text;
   for (const rule of rules) {
     if (!rule.enabled) continue;
-    if (rule.type === "regex" && rule.compiledRegex) {
-      rule.compiledRegex.lastIndex = 0; // Reset stateful regex
-      text = text.replace(rule.compiledRegex, rule.replacement || "");
+    if (rule.type === "regex") {
+      const regex = new RegExp(rule.pattern, "gi");
+      text = text.replace(regex, rule.replacement || "");
     } else if (rule.type === "exact") {
       text = text.replaceAll(rule.pattern, rule.replacement || "");
     }
@@ -493,9 +499,11 @@ function applyRules(text, rules) {
   return text;
 }
 
-export async function applySanitizerFilters(body, provider) {
+export function applySanitizerFilters(body, provider) {
   if (!body?.messages) return body;
-  const rules = await loadRules(provider);
+  const rules = cache.filter(r =>
+    r.enabled && (r.provider === "all" || r.provider === provider)
+  );
   if (rules.length === 0) return body;
 
   // Apply to all message content
@@ -615,10 +623,10 @@ import { applySanitizerFilters } from "../services/sanitizer.js";
 Find the section where Ponytail is injected (around line 177). After the Ponytail block and before `const executor = getExecutor(provider)`, add:
 
 ```javascript
-// ── Sanitizer (provider-conditional) ──
+// ── Sanitizer (provider-conditional, synchronous — cache is in-memory) ──
 const providerConfig = PROVIDERS[provider];
 if (providerConfig?.features?.sanitizer) {
-  await applySanitizerFilters(translatedBody, provider);
+  applySanitizerFilters(translatedBody, provider);
 }
 ```
 
@@ -658,6 +666,7 @@ git commit -m "feat(codebuddy-cn-api): integrate sanitizer into chatCore pipelin
 // open-sse/executors/codebuddyCnApi.js
 import { DefaultExecutor } from "./default.js";
 import { proxyAwareFetch } from "../utils/proxyFetch.js";
+import * as logger from "@/sse/utils/logger.js";
 import {
   buildDefaultHeaders,
   CODEBUDDY_CN_API_CHAT_URL,
@@ -666,6 +675,8 @@ import {
   NEUTRAL_SYSTEM_PROMPT,
   AGENT_PROMPT_LENGTH_THRESHOLD,
 } from "@/lib/codebuddy-cn-api/constants.js";
+
+const LOG_TAG = "CODEBUDDY CN API";
 
 // ── Schema cache for tool sanitization ──
 const schemaCache = new Map();
@@ -1256,10 +1267,13 @@ git commit -m "feat(codebuddy-cn-api): add sanitizer rules REST API"
 
 - [ ] **Step 1: Add Sanitizer to sidebar navigation**
 
-In `src/shared/components/Sidebar.js`, find the `navItems` array and add after the last item:
+In `src/shared/components/Sidebar.js`, find the `systemItems` array and add Sanitizer BEFORE the existing items (so it appears above Settings in the sidebar):
 
 ```javascript
-{ href: "/dashboard/sanitizer", label: "Sanitizer", icon: "filter_alt" },
+const systemItems = [
+  { href: "/dashboard/sanitizer", label: "Sanitizer", icon: "filter_alt" },
+  // ...existing systemItems (Proxy Pools, Skills, etc.)
+];
 ```
 
 - [ ] **Step 2: Create the sanitizer page**

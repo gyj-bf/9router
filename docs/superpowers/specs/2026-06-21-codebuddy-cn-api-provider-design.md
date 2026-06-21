@@ -236,16 +236,16 @@ Applied to:
 
 ### Caching
 
-- In-memory cache with 30s TTL
-- Compiled regex patterns (compiled once, reused)
-- "Reload" button in dashboard bypasses cache immediately
+- No TTL — load once at boot, stays in memory forever
+- CRUD operations (add/update/delete) call `invalidateSanitizerCache()` which reloads from DB immediately
 - Multi-provider support: rules can target `"all"` or specific provider IDs
+- Same pattern as etteum-pool's `filter-cache.ts`
 
 ### chatCore.js Integration
 
 ```javascript
 if (getProviderFeature(provider, "sanitizer")) {
-  body = await applySanitizerFilters(body, provider);
+  applySanitizerFilters(body, provider);  // Synchronous — cache is in-memory
 }
 ```
 
