@@ -18,6 +18,7 @@ import {
   KILOCODE_CONFIG,
 } from "@/lib/oauth/constants/oauth";
 import { buildClineHeaders } from "@/shared/utils/clineAuth";
+import { CODEBUDDY_CN_API_BILLING_URL, getUserAgent } from "@/lib/codebuddy-cn-api/constants";
 
 // OAuth provider test endpoints
 const OAUTH_TEST_CONFIG = {
@@ -627,6 +628,32 @@ async function testApiKeyConnection(connection, effectiveProxy = null) {
           headers: { Authorization: `Bearer ${connection.apiKey}` },
         }, effectiveProxy);
         return { valid: res.ok, error: res.ok ? null : "Invalid API key" };
+      }
+      case "codebuddy-cn-api": {
+        const headers = {
+          "Authorization": `Bearer ${connection.apiKey}`,
+          "Content-Type": "application/json",
+          "User-Agent": getUserAgent(),
+          "X-Product": "SaaS",
+          "X-Domain": "copilot.tencent.com",
+        };
+        const res = await fetchWithConnectionProxy(CODEBUDDY_CN_API_BILLING_URL, {
+          method: "POST",
+          headers,
+          body: "{}",
+          signal: AbortSignal.timeout(15000),
+        }, effectiveProxy);
+        if (res.ok) {
+          const data = await res.json().catch(() => null);
+          if (data?.code === 0) {
+            return { valid: true, error: null };
+          }
+          return { valid: false, error: `Billing API error: ${data?.msg || "unknown"}` };
+        }
+        if (res.status === 401 || res.status === 403) {
+          return { valid: false, error: "Invalid API key" };
+        }
+        return { valid: false, error: `HTTP ${res.status}` };
       }
       default:
         return { valid: false, error: "Provider test not supported" };
