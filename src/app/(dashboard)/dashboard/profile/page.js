@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { Card, Button, Toggle, Input } from "@/shared/components";
 import Modal, { ConfirmModal } from "@/shared/components/Modal";
 import LanguageSwitcher from "@/shared/components/LanguageSwitcher";
+import ProviderIcon from "@/shared/components/ProviderIcon";
 import { useTheme } from "@/shared/hooks/useTheme";
 import { cn } from "@/shared/utils/cn";
 import { APP_CONFIG } from "@/shared/constants/config";
@@ -1134,8 +1135,15 @@ export default function ProfilePage() {
         {/* CodeBuddy CN API Provider */}
         <Card>
           <div className="flex items-center gap-3 mb-4">
-            <div className="p-2 rounded-lg bg-cyan-500/10 text-cyan-500 shrink-0">
-              <span className="material-symbols-outlined text-[20px]">terminal</span>
+            <div className="p-2 rounded-lg bg-cyan-500/10 shrink-0">
+              <ProviderIcon
+                src="/providers/codebuddy-cn-api.png"
+                alt="CodeBuddy CN API"
+                size={20}
+                className="object-contain"
+                fallbackText="CB"
+                fallbackColor="#06b6d4"
+              />
             </div>
             <h3 className="text-base sm:text-lg font-semibold">CodeBuddy CN API Provider</h3>
           </div>
