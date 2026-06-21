@@ -21,6 +21,7 @@ import { detectClientTool, isNativePassthrough } from "../utils/clientDetector.j
 import { dedupeTools } from "../utils/toolDeduper.js";
 import { injectCaveman } from "../rtk/caveman.js";
 import { injectPonytail } from "../rtk/ponytail.js";
+import { applySanitizerFilters } from "../services/sanitizer.js";
 import { compressMessages, formatRtkLog } from "../rtk/index.js";
 import { compressWithHeadroom, formatHeadroomLog } from "../rtk/headroom.js";
 import { getCapabilitiesForModel } from "../providers/capabilities.js";
@@ -176,6 +177,12 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
   if (ponytailEnabled && ponytailLevel) {
     injectPonytail(translatedBody, finalFormat, ponytailLevel);
     log?.debug?.("PONYTAIL", `${ponytailLevel} | ${finalFormat}`);
+  }
+
+  // ── Sanitizer (provider-conditional, synchronous — cache is in-memory) ──
+  const providerConfig = PROVIDERS[provider];
+  if (providerConfig?.features?.sanitizer) {
+    applySanitizerFilters(translatedBody, provider);
   }
 
   const executor = getExecutor(provider);
