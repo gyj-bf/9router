@@ -93,6 +93,8 @@ import p90 from "./xai.js";
 import p91 from "./xiaomi-mimo.js";
 import p92 from "./xiaomi-tokenplan.js";
 import p93 from "./youcom.js";
+// p901 — priority matches provider ID for easy lookup
+import p901 from "./codebuddy-cn-api.js";
 
 export default [
   p0,
@@ -188,5 +190,6 @@ export default [
   p90,
   p91,
   p92,
-  p93
+  p93,
+  p901
 ];
