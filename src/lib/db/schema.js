@@ -148,6 +148,19 @@ export const TABLES = {
       "CREATE INDEX IF NOT EXISTS idx_rd_conn ON requestDetails(connectionId)",
     ],
   },
+  sanitizerRules: {
+    columns: {
+      id: "TEXT PRIMARY KEY",
+      type: "TEXT NOT NULL",
+      pattern: "TEXT NOT NULL",
+      replacement: "TEXT DEFAULT ''",
+      enabled: "INTEGER DEFAULT 1",
+      priority: "INTEGER DEFAULT 0",
+      provider: "TEXT DEFAULT 'all'",
+      createdAt: "TEXT NOT NULL",
+      updatedAt: "TEXT NOT NULL",
+    },
+  },
 };
 
 export function buildCreateTableSql(name, def) {
