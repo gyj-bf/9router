@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getSettings, updateSettings } from "@/lib/localDb";
 import { applyOutboundProxyEnv } from "@/lib/network/outboundProxy";
+import { applyCodebuddyCnApiSettingsToEnv } from "@/lib/codebuddy-cn-api/initCodebuddyCnApiSettings.js";
 import { resetComboRotation } from "open-sse/services/combo.js";
 import bcrypt from "bcryptjs";
 
@@ -77,6 +78,9 @@ export async function PATCH(request) {
     }
 
     const settings = await updateSettings(body);
+
+    // Apply CodeBuddy CN API settings immediately (no restart required)
+    applyCodebuddyCnApiSettingsToEnv(body);
 
     // Apply outbound proxy settings immediately (no restart required)
     if (
