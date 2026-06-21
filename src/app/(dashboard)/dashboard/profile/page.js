@@ -59,6 +59,9 @@ export default function ProfilePage() {
   const [proxyStatus, setProxyStatus] = useState({ type: "", message: "" });
   const [proxyLoading, setProxyLoading] = useState(false);
   const [proxyTestLoading, setProxyTestLoading] = useState(false);
+  const [cbcaCliVersion, setCbcaCliVersion] = useState("");
+  const [cbcaStatus, setCbcaStatus] = useState({ type: "", message: "" });
+  const [cbcaLoading, setCbcaLoading] = useState(false);
 
   useEffect(() => {
     setLocale(getLocaleFromCookie());
@@ -83,6 +86,7 @@ export default function ProfilePage() {
           outboundProxyUrl: data?.outboundProxyUrl || "",
           outboundNoProxy: data?.outboundNoProxy || "",
         });
+        setCbcaCliVersion(data?.codebuddyCnApiCliVersion || "2.109.0");
         setLoading(false);
       })
       .catch((err) => {
@@ -459,6 +463,29 @@ export default function ProfilePage() {
       }
     } catch (err) {
       console.error("Failed to update enableObservability:", err);
+    }
+  };
+
+  const saveCodebuddyCnApiSettings = async () => {
+    setCbcaLoading(true);
+    setCbcaStatus({ type: "", message: "" });
+    try {
+      const res = await fetch("/api/settings", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ codebuddyCnApiCliVersion: cbcaCliVersion }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setSettings((prev) => ({ ...prev, ...data }));
+        setCbcaStatus({ type: "success", message: "CLI version saved" });
+      } else {
+        setCbcaStatus({ type: "error", message: data.error || "Failed to save" });
+      }
+    } catch (err) {
+      setCbcaStatus({ type: "error", message: "An error occurred" });
+    } finally {
+      setCbcaLoading(false);
     }
   };
 
@@ -1101,6 +1128,46 @@ export default function ProfilePage() {
               onChange={updateObservabilityEnabled}
               disabled={loading}
             />
+          </div>
+        </Card>
+
+        {/* CodeBuddy CN API Provider */}
+        <Card>
+          <div className="flex items-center gap-3 mb-4">
+            <div className="p-2 rounded-lg bg-cyan-500/10 text-cyan-500 shrink-0">
+              <span className="material-symbols-outlined text-[20px]">terminal</span>
+            </div>
+            <h3 className="text-base sm:text-lg font-semibold">CodeBuddy CN API Provider</h3>
+          </div>
+          <div className="flex flex-col gap-4">
+            <div className="flex flex-col gap-2">
+              <label className="font-medium text-sm sm:text-base">CLI Version</label>
+              <Input
+                placeholder="2.109.0"
+                value={cbcaCliVersion}
+                onChange={(e) => setCbcaCliVersion(e.target.value)}
+                disabled={loading || cbcaLoading}
+              />
+              <p className="text-xs sm:text-sm text-text-muted font-mono">
+                User-Agent: CLI/{cbcaCliVersion || "2.109.0"} CodeBuddy/{cbcaCliVersion || "2.109.0"}
+              </p>
+            </div>
+            <div className="flex flex-col sm:flex-row gap-2 pt-2 border-t border-border/50">
+              <Button
+                type="button"
+                variant="primary"
+                loading={cbcaLoading}
+                onClick={saveCodebuddyCnApiSettings}
+                className="w-full sm:w-auto"
+              >
+                Save
+              </Button>
+            </div>
+            {cbcaStatus.message && (
+              <p className={`text-xs sm:text-sm ${cbcaStatus.type === "error" ? "text-red-500" : "text-green-500"}`}>
+                {cbcaStatus.message}
+              </p>
+            )}
           </div>
         </Card>
 
