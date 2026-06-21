@@ -80,7 +80,9 @@ export async function PATCH(request) {
     const settings = await updateSettings(body);
 
     // Apply CodeBuddy CN API settings immediately (no restart required)
-    applyCodebuddyCnApiSettingsToEnv(body);
+    if (Object.prototype.hasOwnProperty.call(body, "codebuddyCnApiCliVersion")) {
+      applyCodebuddyCnApiSettingsToEnv(body);
+    }
 
     // Apply outbound proxy settings immediately (no restart required)
     if (

@@ -1,5 +1,7 @@
 // src/lib/codebuddy-cn-api/initCodebuddyCnApiSettings.js
 import { getSettings } from "@/lib/localDb.js";
+import { initSanitizerRules } from "./initSanitizerRules.js";
+import { loadSanitizerCache } from "../../../open-sse/services/sanitizer.js";
 
 const LOG_TAG = "CODEBUDDY CN SETTINGS";
 
@@ -38,6 +40,8 @@ export async function initCodebuddyCnApiSettings() {
 }
 
 // Defer init so HTTP server accepts connections first (same pattern as initOutboundProxy)
-setImmediate(() => {
-  initCodebuddyCnApiSettings().catch(console.log);
+setImmediate(async () => {
+  await initCodebuddyCnApiSettings();
+  await initSanitizerRules();
+  await loadSanitizerCache();
 });

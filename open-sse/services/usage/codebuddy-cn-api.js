@@ -23,7 +23,7 @@ import { proxyAwareFetch } from "../../utils/proxyFetch.js";
 import { PROVIDERS } from "../../providers/index.js";
 import { U, parseResetTime } from "./shared.js";
 import * as logger from "@/sse/utils/logger.js";
-import { CODEBUDDY_CN_API_BILLING_URL } from "@/lib/codebuddy-cn-api/constants.js";
+import { CODEBUDDY_CN_API_BILLING_URL, getUserAgent } from "@/lib/codebuddy-cn-api/constants.js";
 
 const LOG_TAG = "CODEBUDDY CN USAGE";
 const PROVIDER_ID = "codebuddy-cn-api";
@@ -63,6 +63,7 @@ export async function getCodebuddyCnApiUsage(credentials, proxyOptions = null) {
         Authorization: `Bearer ${token}`,
         "Content-Type": "application/json",
         Accept: "application/json",
+        "User-Agent": getUserAgent(),
       },
       body: "{}",
     }, proxyOptions);

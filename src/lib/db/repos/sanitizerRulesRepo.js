@@ -62,6 +62,10 @@ export async function seedDefaultSanitizerRules(rules) {
   const existing = await countSanitizerRules();
   if (existing > 0) return; // Don't overwrite user customizations
   for (const rule of rules) {
-    await createSanitizerRule(rule);
+    try {
+      await createSanitizerRule(rule);
+    } catch (e) {
+      console.warn(`[sanitizer] Failed to seed rule ${rule.id}:`, e.message);
+    }
   }
 }
