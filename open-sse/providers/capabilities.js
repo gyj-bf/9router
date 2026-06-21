@@ -115,6 +115,31 @@ export const PROVIDER_CAPABILITIES = {
     "deepseek-v4-flash":  { vision: true, reasoning: true, thinkingFormat: "openai", thinkingCanDisable: false, contextWindow: 1000000, maxOutput: 50000 },
     "deepseek-v3-2-volc": { reasoning: true, thinkingFormat: "openai", thinkingCanDisable: false, contextWindow: 96000, maxOutput: 32000 },
   },
+
+  // CodeBuddy CN API (copilot.tencent.com/v2) — 19 models via direct API key.
+  // Capabilities from live API probe + models.dev. thinkingFormat "openai" for
+  // reasoning_effort wire format; null for non-reasoning models.
+  "codebuddy-cn-api": {
+    "claude-haiku-4.5":     { tools: true, vision: false, reasoning: true,  thinkingFormat: "openai", thinkingCanDisable: true,  contextWindow: 200000,  maxOutput: 64000 },
+    "deepseek-r1":          { tools: true, vision: false, reasoning: true,  thinkingFormat: "openai", thinkingCanDisable: false, contextWindow: 128000,  maxOutput: 32000 },
+    "deepseek-v3":          { tools: true, vision: false, reasoning: false, thinkingFormat: null,     thinkingCanDisable: false, contextWindow: 1000000, maxOutput: 384000 },
+    "deepseek-v3-2-volc":   { tools: true, vision: true,  reasoning: false, thinkingFormat: null,     thinkingCanDisable: false, contextWindow: 64000,   maxOutput: 32000 },
+    "deepseek-v3.2":        { tools: true, vision: false, reasoning: false, thinkingFormat: null,     thinkingCanDisable: false, contextWindow: 96000,   maxOutput: 32000 },
+    "deepseek-v4-flash":    { tools: true, vision: true,  reasoning: true,  thinkingFormat: "openai", thinkingCanDisable: false, contextWindow: 1000000, maxOutput: 384000 },
+    "deepseek-v4-pro":      { tools: true, vision: true,  reasoning: true,  thinkingFormat: "openai", thinkingCanDisable: false, contextWindow: 1000000, maxOutput: 384000 },
+    "glm-4.7":              { tools: true, vision: false, reasoning: true,  thinkingFormat: "openai", thinkingCanDisable: true,  contextWindow: 204800,  maxOutput: 131072 },
+    "glm-5.0":              { tools: true, vision: false, reasoning: true,  thinkingFormat: "openai", thinkingCanDisable: true,  contextWindow: 204800,  maxOutput: 131072 },
+    "glm-5.1":              { tools: true, vision: true,  reasoning: true,  thinkingFormat: "openai", thinkingCanDisable: false, contextWindow: 200000,  maxOutput: 131072 },
+    "glm-5.2":              { tools: true, vision: true,  reasoning: true,  thinkingFormat: "openai", thinkingCanDisable: false, contextWindow: 1000000, maxOutput: 131072 },
+    "glm-5v-turbo":         { tools: true, vision: true,  reasoning: true,  thinkingFormat: "openai", thinkingCanDisable: false, contextWindow: 200000,  maxOutput: 131072 },
+    "hunyuan-2.0-instruct": { tools: true, vision: false, reasoning: false, thinkingFormat: null,     thinkingCanDisable: false, contextWindow: 256000,  maxOutput: 8000 },
+    "hy3-preview":          { tools: true, vision: false, reasoning: true,  thinkingFormat: "openai", thinkingCanDisable: false, contextWindow: 256000,  maxOutput: 64000 },
+    "kimi-k2.5":            { tools: true, vision: true,  reasoning: true,  thinkingFormat: "openai", thinkingCanDisable: false, contextWindow: 262144,  maxOutput: 262144 },
+    "kimi-k2.6":            { tools: true, vision: true,  reasoning: true,  thinkingFormat: "openai", thinkingCanDisable: false, contextWindow: 262144,  maxOutput: 262144 },
+    "kimi-k2.7":            { tools: true, vision: true,  reasoning: true,  thinkingFormat: "openai", thinkingCanDisable: false, contextWindow: 262144,  maxOutput: 262144 },
+    "minimax-m2.7":         { tools: true, vision: true,  reasoning: true,  thinkingFormat: "openai", thinkingCanDisable: false, contextWindow: 204800,  maxOutput: 131072 },
+    "minimax-m3":           { tools: true, vision: true,  reasoning: true,  thinkingFormat: "openai", thinkingCanDisable: false, contextWindow: 512000,  maxOutput: 128000 },
+  },
 };
 
 /**
