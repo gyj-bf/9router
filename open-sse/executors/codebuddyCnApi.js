@@ -1,7 +1,6 @@
 // open-sse/executors/codebuddyCnApi.js
 import { DefaultExecutor } from "./default.js";
 import { proxyAwareFetch } from "../utils/proxyFetch.js";
-import * as logger from "@/sse/utils/logger.js";
 import {
   buildDefaultHeaders,
   CODEBUDDY_CN_API_CHAT_URL,
@@ -10,8 +9,6 @@ import {
   NEUTRAL_SYSTEM_PROMPT,
   AGENT_PROMPT_LENGTH_THRESHOLD,
 } from "@/lib/codebuddy-cn-api/constants.js";
-
-const LOG_TAG = "CODEBUDDY CN API";
 
 // ── Schema cache for tool sanitization ──
 const schemaCache = new Map();
@@ -213,8 +210,6 @@ export class CodebuddyCnApiExecutor extends DefaultExecutor {
     const url = this.buildUrl(model, stream);
     const headers = this.buildHeaders(credentials);
     const transformed = this.transformRequest(model, body, stream, credentials);
-
-    logger.debug(LOG_TAG, `Executing request for model: ${model}`, { url });
 
     const response = await proxyAwareFetch(url, {
       method: "POST",

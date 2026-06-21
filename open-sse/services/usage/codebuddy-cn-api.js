@@ -131,11 +131,6 @@ export async function getCodebuddyCnApiUsage(credentials, proxyOptions = null) {
       };
     });
 
-    logger.debug(LOG_TAG, "Usage fetched", {
-      refills: refills.length,
-      bonuses: bonuses.length,
-    });
-
     return { plan: "CodeBuddy CN API", quotas };
   } catch (error) {
     logger.warn(LOG_TAG, "Usage fetch failed", { error: error.message });
