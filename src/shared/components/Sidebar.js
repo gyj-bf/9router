@@ -34,6 +34,7 @@ const debugItems = [
 ];
 
 const systemItems = [
+  { href: "/dashboard/sanitizer", label: "Sanitizer", icon: "filter_alt" },
   { href: "/dashboard/proxy-pools", label: "Proxy Pools", icon: "lan" },
   { href: "/dashboard/skills", label: "Skills", icon: "extension" },
 ];
