@@ -3,11 +3,11 @@
 import { useState, useEffect, useCallback } from "react";
 import PropTypes from "prop-types";
 import { Card, Badge, Button, Toggle, Modal, ConfirmModal } from "@/shared/components";
+import Pagination from "@/shared/components/Pagination";
 
 const PROVIDER_OPTIONS = [
-  { value: "all", label: "All Providers" },
-  { value: "codebuddy-cn-api", label: "CodeBuddy CN API" },
-  { value: "qoder-api", label: "Qoder API" },
+  { value: "all", label: "All Providers", icon: "dns", description: "Apply to every provider" },
+  { value: "codebuddy-cn-api", label: "CodeBuddy CN API", icon: "smart_toy", description: "Tencent CodeBuddy China" },
 ];
 
 const TYPE_OPTIONS = [
@@ -35,6 +35,7 @@ export default function SanitizerPage() {
   const [formData, setFormData] = useState(EMPTY_FORM);
   const [formError, setFormError] = useState(null);
   const [submitting, setSubmitting] = useState(false);
+  const [pagination, setPagination] = useState({ page: 1, pageSize: 20 });
 
   const fetchRules = useCallback(async () => {
     try {
@@ -51,6 +52,13 @@ export default function SanitizerPage() {
   useEffect(() => {
     fetchRules();
   }, [fetchRules]);
+
+  useEffect(() => {
+    const maxPage = Math.max(1, Math.ceil(rules.length / pagination.pageSize));
+    if (pagination.page > maxPage) {
+      setPagination((prev) => ({ ...prev, page: maxPage }));
+    }
+  }, [rules.length, pagination.page, pagination.pageSize]);
 
   const handleToggle = async (rule) => {
     const newEnabled = rule.enabled ? 0 : 1;
@@ -201,6 +209,11 @@ export default function SanitizerPage() {
     fetchRules();
   };
 
+  const paginatedRules = rules.slice(
+    (pagination.page - 1) * pagination.pageSize,
+    pagination.page * pagination.pageSize
+  );
+
   if (loading) {
     return (
       <div className="flex min-w-0 flex-col gap-6 px-1 sm:px-0">
@@ -287,7 +300,7 @@ export default function SanitizerPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-border-subtle">
-                {rules.map((rule) => (
+                {paginatedRules.map((rule) => (
                   <RuleRow
                     key={rule.id}
                     rule={rule}
@@ -301,6 +314,17 @@ export default function SanitizerPage() {
           </div>
         )}
       </Card>
+
+      {/* Pagination */}
+      {rules.length > 0 && (
+        <Pagination
+          currentPage={pagination.page}
+          pageSize={pagination.pageSize}
+          totalItems={rules.length}
+          onPageChange={(p) => setPagination((prev) => ({ ...prev, page: p }))}
+          onPageSizeChange={(ps) => setPagination((prev) => ({ ...prev, pageSize: ps, page: 1 }))}
+        />
+      )}
 
       {/* Rule count */}
       {rules.length > 0 && (
@@ -416,20 +440,44 @@ export default function SanitizerPage() {
 
           {/* Provider */}
           <div>
-            <label className="block text-xs font-medium text-text-muted mb-1">
+            <label className="block text-xs font-medium text-text-muted mb-1.5">
               Provider
             </label>
-            <select
-              value={formData.provider}
-              onChange={(e) => setFormData((f) => ({ ...f, provider: e.target.value }))}
-              className="w-full rounded-lg bg-white/5 border border-border-subtle px-3 py-2 text-sm text-text-main focus:outline-none focus:border-primary/50"
-            >
+            <div className="flex flex-col gap-1.5">
               {PROVIDER_OPTIONS.map((opt) => (
-                <option key={opt.value} value={opt.value}>
-                  {opt.label}
-                </option>
+                <button
+                  key={opt.value}
+                  type="button"
+                  onClick={() => setFormData((f) => ({ ...f, provider: opt.value }))}
+                  className={`flex items-center gap-3 rounded-lg border px-3 py-2.5 text-left text-sm transition-all ${
+                    formData.provider === opt.value
+                      ? "border-primary/50 bg-primary/5 ring-1 ring-primary/20"
+                      : "border-border-subtle bg-white/[0.02] hover:bg-white/[0.04] hover:border-border-subtle/80"
+                  }`}
+                >
+                  <span
+                    className={`material-symbols-outlined text-[18px] shrink-0 ${
+                      formData.provider === opt.value ? "text-primary" : "text-text-muted"
+                    }`}
+                  >
+                    {opt.icon}
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <div className={`text-sm font-medium ${formData.provider === opt.value ? "text-primary" : "text-text-main"}`}>
+                      {opt.label}
+                    </div>
+                    <div className="text-[11px] text-text-muted leading-tight">
+                      {opt.description}
+                    </div>
+                  </div>
+                  {formData.provider === opt.value && (
+                    <span className="material-symbols-outlined text-[16px] text-primary shrink-0">
+                      check_circle
+                    </span>
+                  )}
+                </button>
               ))}
-            </select>
+            </div>
           </div>
 
           {/* Enabled toggle */}
@@ -474,8 +522,9 @@ export default function SanitizerPage() {
 }
 
 function RuleRow({ rule, onToggle, onEdit, onDelete }) {
-  const providerLabel =
-    PROVIDER_OPTIONS.find((p) => p.value === rule.provider)?.label || rule.provider || "All Providers";
+  const providerOption = PROVIDER_OPTIONS.find((p) => p.value === rule.provider);
+  const providerLabel = providerOption?.label || rule.provider || "All Providers";
+  const providerIcon = providerOption?.icon || "dns";
 
   return (
     <tr className="group hover:bg-white/[0.02] transition-colors">
@@ -531,7 +580,10 @@ function RuleRow({ rule, onToggle, onEdit, onDelete }) {
 
       {/* Provider */}
       <td className="px-4 py-3">
-        <span className="text-xs text-text-muted">{providerLabel}</span>
+        <span className="inline-flex items-center gap-1.5 text-xs text-text-muted">
+          <span className="material-symbols-outlined text-[14px] text-text-muted/60">{providerIcon}</span>
+          {providerLabel}
+        </span>
       </td>
 
       {/* Priority */}
