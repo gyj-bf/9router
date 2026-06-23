@@ -49,6 +49,7 @@ import {
   NEUTRAL_SYSTEM_PROMPT,
   AGENT_PROMPT_LENGTH_THRESHOLD,
   DEFAULT_CLI_VERSION,
+  DEFAULT_REASONING_EFFORT,
   getUserAgent,
 } from "@/lib/codebuddy-cn-api/constants.js";
 
@@ -567,11 +568,11 @@ describe("sanitizeToolSchemas — defaults", () => {
 // ─── injectReasoning (via transformRequest) ──────────────────────────────────
 
 describe("injectReasoning", () => {
-  it("defaults reasoning_effort to 'max' when not specified", () => {
+  it("defaults reasoning_effort to 'high' when not specified by client", () => {
     const body = { messages: [{ role: "user", content: "hi" }] };
     const result = transform(body);
-    expect(result.reasoning_effort).toBe("max");
-    expect(result.reasoning_summary).toBe("auto");
+    expect(result.reasoning_effort).toBe("high");
+    expect(result.reasoning_summary).toBeUndefined();
   });
 
   it("preserves explicit reasoning_effort value", () => {
@@ -581,7 +582,7 @@ describe("injectReasoning", () => {
     };
     const result = transform(body);
     expect(result.reasoning_effort).toBe("low");
-    expect(result.reasoning_summary).toBe("auto");
+    expect(result.reasoning_summary).toBeUndefined();
   });
 
   it("strips reasoning when effort is 'none'", () => {
@@ -591,7 +592,6 @@ describe("injectReasoning", () => {
     };
     const result = transform(body);
     expect(result.reasoning_effort).toBeUndefined();
-    expect(result.reasoning_summary).toBeUndefined();
   });
 
   it("strips reasoning when effort is 'off'", () => {
@@ -601,16 +601,15 @@ describe("injectReasoning", () => {
     };
     const result = transform(body);
     expect(result.reasoning_effort).toBeUndefined();
-    expect(result.reasoning_summary).toBeUndefined();
   });
 
-  it("converts Anthropic thinking.type=enabled to reasoning_effort=max", () => {
+  it("converts Anthropic thinking.type=enabled to reasoning_effort=high", () => {
     const body = {
       messages: [{ role: "user", content: "hi" }],
       thinking: { type: "enabled", budget_tokens: 10000 },
     };
     const result = transform(body);
-    expect(result.reasoning_effort).toBe("max");
+    expect(result.reasoning_effort).toBe(DEFAULT_REASONING_EFFORT);
     expect(result.thinking).toBeUndefined();
   });
 

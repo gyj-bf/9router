@@ -8,6 +8,7 @@ import {
   AGENT_PROMPT_PATTERNS,
   NEUTRAL_SYSTEM_PROMPT,
   AGENT_PROMPT_LENGTH_THRESHOLD,
+  DEFAULT_REASONING_EFFORT,
 } from "@/lib/codebuddy-cn-api/constants.js";
 
 // ── Schema cache for tool sanitization ──
@@ -140,20 +141,18 @@ function cleanMessages(messages) {
 }
 
 function injectReasoning(body) {
-  const effort = body.reasoning_effort
+  const explicitEffort = body.reasoning_effort
     || body.reasoning?.effort
-    || (body.thinking?.type === "enabled" ? "max" : null);
+    || (body.thinking?.type === "enabled" ? DEFAULT_REASONING_EFFORT : null);
 
-  if (effort === "none" || effort === "off") {
+  if (explicitEffort === "none" || explicitEffort === "off") {
     delete body.reasoning_effort;
-    delete body.reasoning;
   } else {
-    body.reasoning_effort = effort || "max";
-    body.reasoning_summary = "auto";
+    body.reasoning_effort = explicitEffort || DEFAULT_REASONING_EFFORT;
   }
-  // Clean up Anthropic-style thinking params
-  delete body.thinking;
+
   delete body.reasoning;
+  delete body.thinking;
 }
 
 function applyMaxTokensDefault(body, model) {

@@ -97,3 +97,5 @@ export const AGENT_PROMPT_PATTERNS = [
 
 export const NEUTRAL_SYSTEM_PROMPT = "You are a helpful AI assistant that helps with software engineering tasks.";
 export const AGENT_PROMPT_LENGTH_THRESHOLD = 2000;
+
+export const DEFAULT_REASONING_EFFORT = "high";
