@@ -18,6 +18,10 @@ import {
   KILOCODE_CONFIG,
 } from "@/lib/oauth/constants/oauth";
 import { buildClineHeaders } from "@/shared/utils/clineAuth";
+import { openaiToCommandCodeApiRequest } from "open-sse/translator/request/openai-to-commandcode-api.js";
+import { getFingerprint as getCmcApiFingerprint, generateTraceparent as generateCmcApiTraceparent } from "open-sse/services/cmcApiFingerprint.js";
+import { getCachedVersion as getCmcApiCachedVersion } from "open-sse/services/cmcApiVersionTracker.js";
+import { CONTENT_TYPE_HEADER, CLI_ENVIRONMENT, USER_AGENT, DEFAULT_CLI_VERSION } from "open-sse/config/cmcApiConstants.js";
 
 // OAuth provider test endpoints
 const OAUTH_TEST_CONFIG = {
@@ -627,6 +631,36 @@ async function testApiKeyConnection(connection, effectiveProxy = null) {
           headers: { Authorization: `Bearer ${connection.apiKey}` },
         }, effectiveProxy);
         return { valid: res.ok, error: res.ok ? null : "Invalid API key" };
+      }
+      case "commandcode-api": {
+        const cfg = PROVIDERS["commandcode-api"];
+        const model = getDefaultModel("commandcode-api") || "deepseek/deepseek-v4-pro";
+        const payload = openaiToCommandCodeApiRequest(model, {
+          messages: [{ role: "user", content: "ping" }],
+          max_tokens: 1,
+          stream: false,
+        }, false);
+        const cmcaVersion = getCmcApiCachedVersion() || DEFAULT_CLI_VERSION;
+        const cmcaFpResult = getCmcApiFingerprint(connection.providerSpecificData);
+        const cmcaFp = cmcaFpResult.fingerprint || cmcaFpResult;
+        const res = await fetchWithConnectionProxy(cfg.baseUrl, {
+          method: "POST",
+          headers: {
+            "Content-Type": CONTENT_TYPE_HEADER,
+            "Accept": "text/event-stream",
+            "Authorization": `Bearer ${connection.apiKey}`,
+            "x-command-code-version": cmcaVersion,
+            "x-cli-environment": CLI_ENVIRONMENT,
+            "x-session-id": crypto.randomUUID(),
+            "x-machine-id": cmcaFp.machineId,
+            "x-project-slug": cmcaFp.projectSlug,
+            "traceparent": generateCmcApiTraceparent(),
+            "User-Agent": USER_AGENT,
+          },
+          body: JSON.stringify(payload),
+        }, effectiveProxy);
+        const valid = res.status !== 401 && res.status !== 403;
+        return { valid, error: valid ? null : `Invalid API key (status ${res.status})` };
       }
       default:
         return { valid: false, error: "Provider test not supported" };

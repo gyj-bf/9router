@@ -93,6 +93,22 @@ export const MODEL_CAPABILITIES = {
  * Provider-specific capability overrides. Keyed by provider alias/id.
  */
 export const PROVIDER_CAPABILITIES = {
+  // commandcode-api — data sourced from models.dev API (canonical provider entries).
+  // Only models with "image" in input modalities get vision:true.
+  "commandcode-api": {
+    "deepseek/deepseek-v4-pro":    { reasoning: true, contextWindow: 1000000, maxOutput: 384000 },
+    "deepseek/deepseek-v4-flash":  { reasoning: true, contextWindow: 1000000, maxOutput: 384000 },
+    "moonshotai/Kimi-K2.6":        { vision: true, videoInput: true, reasoning: true, contextWindow: 262144, maxOutput: 262144 },
+    "moonshotai/Kimi-K2.5":        { vision: true, videoInput: true, reasoning: true, contextWindow: 262144, maxOutput: 262144 },
+    "zai-org/GLM-5.1":             { reasoning: true, contextWindow: 128000, maxOutput: 128000 },
+    "zai-org/GLM-5":               { reasoning: true, contextWindow: 128000, maxOutput: 128000 },
+    "MiniMaxAI/MiniMax-M2.7":      { reasoning: true, contextWindow: 204800, maxOutput: 196608 },
+    "MiniMaxAI/MiniMax-M2.5":      { reasoning: true, contextWindow: 204800, maxOutput: 196608 },
+    "Qwen/Qwen3.6-Max-Preview":    { reasoning: true, contextWindow: 1000000, maxOutput: 65536 },
+    "Qwen/Qwen3.6-Plus":           { vision: true, videoInput: true, reasoning: true, contextWindow: 1000000, maxOutput: 65536 },
+    "stepfun/Step-3.5-Flash":      { reasoning: true, contextWindow: 256000, maxOutput: 256000 },
+  },
+
   // CodeBuddy.cn — authoritative per-model metadata from the gateway's model
   // config (contextWindow=maxInputTokens, maxOutput=maxOutputTokens, vision=
   // supportsImages). Every model reasons via OpenAI-style reasoning_effort

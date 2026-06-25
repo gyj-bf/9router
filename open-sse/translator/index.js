@@ -280,3 +280,5 @@ import "./response/cursor-to-openai.js";
 import "./response/ollama-to-openai.js";
 import "./response/commandcode-to-openai.js";
 import "./response/kiro-to-claude.js";
+import "./request/openai-to-commandcode-api.js";
+import "./response/commandcode-api-to-openai.js";

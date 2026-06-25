@@ -4,6 +4,7 @@ import { isOpenAICompatibleProvider, isAnthropicCompatibleProvider, isCustomEmbe
 import { getDefaultModel } from "open-sse/config/providerModels.js";
 import { resolveOllamaLocalHost, resolveXiaomiTokenplanBaseUrl, PROVIDERS } from "open-sse/config/providers.js";
 import { openaiToCommandCodeRequest } from "open-sse/translator/request/openai-to-commandcode.js";
+import { openaiToCommandCodeApiRequest } from "open-sse/translator/request/openai-to-commandcode-api.js";
 import { normalizeProviderId } from "@/lib/providerNormalization";
 
 // Probe a webSearch/webFetch provider using its searchConfig/fetchConfig.
@@ -419,6 +420,36 @@ export async function POST(request) {
               "Content-Type": "application/json",
               ...(cfg.headers || {}),
               "x-session-id": crypto.randomUUID(),
+              "Authorization": `Bearer ${apiKey}`,
+            },
+            body: JSON.stringify(payload),
+          });
+          isValid = res.status !== 401 && res.status !== 403;
+          break;
+        }
+
+        case "commandcode-api": {
+          const cfg = PROVIDERS["commandcode-api"];
+          const model = getDefaultModel("commandcode-api") || "deepseek/deepseek-v4-pro";
+          const payload = openaiToCommandCodeApiRequest(model, {
+            messages: [{ role: "user", content: "ping" }],
+            max_tokens: 1,
+            stream: false,
+          }, false);
+          const cmcVersion = getCmcApiCachedVersion();
+          const cmcFp = getCmcApiFingerprint(null);
+          const res = await fetch(cfg.baseUrl, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "Accept": "text/event-stream",
+              "x-command-code-version": cmcVersion,
+              "x-cli-environment": "cli",
+              "x-session-id": crypto.randomUUID(),
+              "x-machine-id": cmcFp.machineId,
+              "x-project-slug": cmcFp.projectSlug,
+              "traceparent": generateCmcApiTraceparent(),
+              "User-Agent": "node",
               "Authorization": `Bearer ${apiKey}`,
             },
             body: JSON.stringify(payload),
