@@ -2,7 +2,7 @@ import { QODER_STALL_TIMEOUT_MS, QODER_REQUEST_TIMEOUT_MS } from "../../shared/q
 
 export default {
   id: "qoder-api",
-  priority: 31,
+  priority: 900,
   alias: "qda",
   uiAlias: "qda",
   display: {
