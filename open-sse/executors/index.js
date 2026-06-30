@@ -6,6 +6,7 @@ import { IFlowExecutor } from "./iflow.js";
 import { QoderExecutor } from "./qoder.js";
 import { QoderApiExecutor } from "./qoderApi.js";
 import { KiroExecutor } from "./kiro.js";
+import { KimchiExecutor } from "./kimchi.js";
 import { CodexExecutor } from "./codex.js";
 import { CursorExecutor } from "./cursor.js";
 import { VertexExecutor } from "./vertex.js";
@@ -30,6 +31,7 @@ const executors = {
   qoder: new QoderExecutor(),
   "qoder-api": new QoderApiExecutor(),
   kiro: new KiroExecutor(),
+  kimchi: new KimchiExecutor(),
   codex: new CodexExecutor(),
   cursor: new CursorExecutor(),
   cu: new CursorExecutor(), // Alias for cursor
@@ -69,6 +71,7 @@ export { IFlowExecutor } from "./iflow.js";
 export { QoderExecutor } from "./qoder.js";
 export { QoderApiExecutor } from "./qoderApi.js";
 export { KiroExecutor } from "./kiro.js";
+export { KimchiExecutor } from "./kimchi.js";
 export { CodexExecutor } from "./codex.js";
 export { CursorExecutor } from "./cursor.js";
 export { VertexExecutor } from "./vertex.js";

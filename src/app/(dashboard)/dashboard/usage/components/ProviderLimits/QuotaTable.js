@@ -153,6 +153,11 @@ export default function QuotaTable({
               const colors = getColorClasses(quota.remaining);
               const countdown = formatResetTime(quota.resetAt);
               const resetDisplay = formatResetTimeDisplay(quota.resetAt);
+              // recurring defaults true: a missing flag means the quota
+              // refreshes at resetAt. Bonus/one-shot packs set recurring:false
+              // and their resetAt is a hard expiry, so word it as "expires".
+              const recurring = quota.recurring !== false;
+              const countdownLabel = recurring ? `in ${countdown}` : `expires in ${countdown}`;
 
               return (
                 <tr
